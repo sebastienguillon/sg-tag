@@ -79,6 +79,10 @@ month), with `-alpha.N` / `-beta.N` suffixes before a stable release.
    pre-release for `-alpha`/`-beta` versions).
 4. Review the draft and its notes on GitHub, then publish it.
 
+To try packaging without releasing, run the **Release** workflow manually on a branch
+(`gh workflow run release.yml --ref master`): the installers are kept as workflow artifacts for a
+week.
+
 ## Conventions
 
 Conventional Commits, enforced by commitlint. Git hooks are managed by lefthook and installed by

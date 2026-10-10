@@ -2,9 +2,12 @@ name: Release
 
 # Pushing a version tag (vYYYY.M.PATCH, optionally -alpha.N / -beta.N) builds the installers on
 # each OS and attaches them to a draft GitHub release, to be reviewed and published by hand.
+# Running it manually from a branch is a dry run: installers are built and kept as workflow
+# artifacts for a week, and no release is created.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,7 +23,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: |
+      - if: github.ref_type == 'tag'
+        run: |
           version="$(jq -r .version package.json)"
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
             echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
@@ -58,12 +62,13 @@ jobs:
             release/*.AppImage
             release/*.deb
           if-no-files-found: error
-          # Only a hand-off to the publish job; the release keeps the files.
-          retention-days: 1
+          # For releases this is only a hand-off to the publish job; dry runs keep them to try out.
+          retention-days: ${{ github.ref_type == 'tag' && 1 || 7 }}
 
   publish:
     name: Draft GitHub release
     needs: build
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
