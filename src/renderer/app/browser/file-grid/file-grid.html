@@ -1,0 +1,26 @@
+<cdk-virtual-scroll-viewport
+  class="viewport"
+  role="listbox"
+  aria-label="Files"
+  aria-multiselectable="true"
+  tabindex="0"
+  [itemSize]="layout().rowHeight"
+  [minBufferPx]="layout().rowHeight"
+  [maxBufferPx]="layout().rowHeight * 3"
+  [attr.aria-activedescendant]="activeDescendant()"
+  (scrolledIndexChange)="onScrolled($event)"
+  (keydown)="onKeydown($event)"
+  (click)="onClick($event)"
+  (dblclick)="onDoubleClick($event)"
+>
+  <div *cdkVirtualFor="let row of rows()" class="row" role="none">
+    @for (id of row | rowIds: ids() : layout().columns; track id) {
+      <app-file-tile
+        [fileId]="id"
+        [index]="row * layout().columns + $index"
+        [selected]="selection().has(id)"
+        [focused]="id === focusedId()"
+      />
+    }
+  </div>
+</cdk-virtual-scroll-viewport>

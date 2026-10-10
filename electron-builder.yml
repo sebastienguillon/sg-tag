@@ -1,0 +1,32 @@
+# https://www.electron.build/configuration
+appId: com.sebastienguillon.sgtag
+productName: SG Tag
+copyright: Copyright © 2026 Sébastien Guillon
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+
+# libvips ships as shared libraries next to sharp's addon; they cannot be loaded from the asar.
+asarUnpack:
+  - '**/node_modules/sharp/**/*'
+  - '**/node_modules/@img/**/*'
+
+# Optional ffmpeg/ffprobe binaries, per platform: resources/bin/<mac|win|linux>/
+extraResources:
+  - from: resources/bin/${os}
+    to: bin
+    filter: ['**/*']
+
+mac:
+  category: public.app-category.photography
+  target: [dmg]
+win:
+  target: [nsis]
+linux:
+  category: Graphics
+  target: [AppImage, deb]

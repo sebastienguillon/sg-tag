@@ -1,0 +1,22 @@
+# pnpm settings (https://pnpm.io/settings). This is a single-package repository, not a monorepo.
+
+# Dependency build scripts are blocked unless reviewed here; an unlisted one fails the install.
+allowBuilds:
+  # Native addons, rebuilt for Electron by `electron-builder install-app-deps` (postinstall).
+  '@parcel/watcher': true
+  better-sqlite3: true
+  # Downloads the Electron binary.
+  electron: true
+  # Picks the 7-Zip binary used to build Windows installers.
+  electron-winstaller: true
+  # Verifies its platform binary.
+  esbuild: true
+  # Installs the git hooks.
+  lefthook: true
+  # Native helpers of the Angular build cache.
+  lmdb: true
+  msgpackr-extract: true
+  # Ships a prebuilt binary; nothing to build.
+  fsevents: false
+minimumReleaseAgeExclude:
+  - '@types/node@24.19.2'

@@ -1,0 +1,9 @@
+/* Renderer unit tests, run by `ng test` (Vitest). */
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["vitest/globals"]
+  },
+  "include": ["src/renderer/**/*.d.ts", "src/renderer/**/*.spec.ts"]
+}

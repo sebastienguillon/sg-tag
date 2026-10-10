@@ -1,0 +1,10 @@
+/* Renderer (Angular) application code. */
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["src/renderer/**/*.ts", "src/shared/**/*.ts"],
+  "exclude": ["src/**/*.spec.ts"]
+}

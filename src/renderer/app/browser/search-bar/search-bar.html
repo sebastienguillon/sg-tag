@@ -1,0 +1,51 @@
+<div class="field">
+  <app-icon class="search-icon" name="search" />
+  <input
+    #input
+    type="search"
+    aria-label="Search files"
+    placeholder="Search names, folders, tags…"
+    spellcheck="false"
+    autocomplete="off"
+    [value]="query()"
+    (input)="onInput($event)"
+    (keydown)="onKeydown($event)"
+  />
+  @if (query() !== '') {
+    <button type="button" class="icon-button" aria-label="Clear search" (click)="clear()">
+      <app-icon name="x" />
+    </button>
+  }
+  <button
+    type="button"
+    class="icon-button help-button"
+    aria-label="Search syntax"
+    popovertarget="search-help"
+  >
+    ?
+  </button>
+</div>
+
+<div id="search-help" class="help" popover>
+  <h2>Search syntax</h2>
+  <dl>
+    <dt>beach</dt>
+    <dd>names, folders or tags containing “beach”</dd>
+    <dt>"summer trip"</dt>
+    <dd>exact phrase</dd>
+    <dt>tag:trips</dt>
+    <dd>tagged “trips” or any tag below it, e.g. trips/japan</dd>
+    <dt>-tag:draft</dt>
+    <dd>a leading minus excludes</dd>
+    <dt>type:video</dt>
+    <dd>image or video</dd>
+    <dt>ext:jpg,png</dt>
+    <dd>file extensions (commas mean “or”)</dd>
+    <dt>size:&gt;10mb</dt>
+    <dd>also &lt;1gb, 1mb..5mb</dd>
+    <dt>in:2024/japan</dt>
+    <dd>folder path contains</dd>
+    <dt>is:untagged</dt>
+    <dd>also is:tagged, is:missing, is:offline</dd>
+  </dl>
+</div>

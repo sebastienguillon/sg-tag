@@ -1,0 +1,162 @@
+/* Design tokens. Backgrounds match the BrowserWindow colours (no flash on open). */
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f6f7;
+  --surface: #ffffff;
+  --chrome-bg: #ececee;
+  --field-bg: #ffffff;
+  --tile-bg: #e4e4e8;
+  --hover: #ebebef;
+  --border: #d9d9de;
+  --text: #1b1c1f;
+  --text-muted: #63656e;
+  --text-faint: #9c9ea6;
+  --accent: #2f6bf0;
+  --accent-text: #ffffff;
+  --focus-ring: #2f6bf0;
+  --focus-halo: rgb(47 107 240 / 22%);
+  --danger: #d33a32;
+  --warning: #c27a00;
+  --warning-bg: #fff4dc;
+  --chip-bg: #e3eaff;
+  --chip-text: #1f3f99;
+  --badge-bg: rgb(16 17 20 / 68%);
+  --badge-text: #ffffff;
+  --image-accent: #7cc4ff;
+  --video-accent: #ffb454;
+  --shadow: 0 8px 28px rgb(0 0 0 / 16%), 0 1px 3px rgb(0 0 0 / 10%);
+
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --radius-s: 6px;
+  --radius-m: 8px;
+  --toolbar-height: 52px;
+  --sidebar-width: 300px;
+  --titlebar-inset: 0px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141518;
+    --surface: #1b1c20;
+    --chrome-bg: #1f2024;
+    --field-bg: #141518;
+    --tile-bg: #25262b;
+    --hover: #2a2b31;
+    --border: #2f3036;
+    --text: #e8e9ed;
+    --text-muted: #a0a2ab;
+    --text-faint: #6c6e77;
+    --accent: #5b8cff;
+    --focus-ring: #5b8cff;
+    --focus-halo: rgb(91 140 255 / 28%);
+    --danger: #ff6b62;
+    --warning: #f0b14a;
+    --warning-bg: #3a2d12;
+    --chip-bg: #263457;
+    --chip-text: #c9d6ff;
+    --shadow: 0 10px 32px rgb(0 0 0 / 50%), 0 1px 3px rgb(0 0 0 / 40%);
+  }
+}
+
+/* Room for the traffic lights of the macOS hidden-inset title bar. */
+:root[data-platform='darwin'] {
+  --titlebar-inset: 68px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 var(--font);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+.button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button:disabled {
+  opacity: 0.5;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 16px;
+  -webkit-app-region: no-drag;
+}
+
+.icon-button:hover,
+.icon-button.active {
+  background: var(--hover);
+  color: var(--text);
+}

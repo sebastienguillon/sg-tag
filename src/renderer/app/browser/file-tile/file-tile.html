@@ -1,0 +1,38 @@
+@let current = file();
+@if (current) {
+  @let url = thumbnailUrl();
+  @if (url !== null && !failed()) {
+    <img
+      class="thumbnail"
+      alt=""
+      decoding="async"
+      draggable="false"
+      [class.loaded]="loaded()"
+      [src]="url"
+      (load)="loaded.set(true)"
+      (error)="failed.set(true)"
+    />
+  } @else {
+    <app-icon class="placeholder" [name]="kindIcon()" />
+  }
+  <span class="badge" [class.video]="current.kind === 'video'">
+    <app-icon [name]="kindIcon()" />{{ current.format }}
+  </span>
+  @if (current.offline) {
+    <span class="offline" title="On a drive that is not connected">
+      <app-icon name="hard-drive" />
+    </span>
+  }
+  <span class="info" aria-hidden="true">
+    <span class="name">{{ current.name }}</span>
+    <span class="meta">
+      {{ current.size | fileSize }}
+      @if (current.width !== null && current.height !== null) {
+        · {{ current.width }}×{{ current.height }}
+      }
+      @if (current.durationMs !== null) {
+        · {{ current.durationMs | duration }}
+      }
+    </span>
+  </span>
+}

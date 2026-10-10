@@ -1,0 +1,28 @@
+<span>
+  @if (filtered()) {
+    {{ shown() | number }} of {{ status()?.totalFiles ?? 0 | number }} files
+  } @else {
+    {{ shown() | number }} files
+  }
+  <span class="faint">· {{ elapsedMs() | number: '1.0-1' }} ms</span>
+</span>
+@if (selected() > 0) {
+  <span>{{ selected() | number }} selected</span>
+}
+<span class="spacer"></span>
+@if (status(); as current) {
+  @if (current.scanning !== null) {
+    <span class="activity" [title]="current.scanning">
+      <app-icon class="spin" name="loader" /> Indexing {{ current.scanning }}
+    </span>
+  }
+  @if (current.pendingThumbnails > 0) {
+    <span class="faint">{{ current.pendingThumbnails | number }} thumbnails to render</span>
+  }
+  @if (current.offlineRoots > 0) {
+    <span class="warning">
+      <app-icon name="hard-drive" />
+      {{ current.offlineRoots }} folder{{ current.offlineRoots === 1 ? '' : 's' }} offline
+    </span>
+  }
+}

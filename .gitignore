@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+release/
+out-tsc/
+*.tsbuildinfo
+
+# Development profile (see SG_TAG_USER_DATA)
+.dev-data/
+
+# Angular & test caches
+.angular/
+coverage/
+
+# Bundled third-party binaries (ffmpeg/ffprobe), fetched per platform at packaging time
+/resources/bin/*/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
+.env*

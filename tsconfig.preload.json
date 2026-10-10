@@ -1,0 +1,11 @@
+/* Sandboxed preload script: DOM + the `electron` renderer APIs, no Node built-ins. */
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["src/preload/**/*.ts", "src/shared/**/*.ts"]
+}

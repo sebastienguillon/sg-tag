@@ -1,0 +1,39 @@
+<div class="field">
+  <app-icon name="tag" />
+  <input
+    #input
+    type="text"
+    role="combobox"
+    aria-label="Add a tag"
+    aria-autocomplete="list"
+    placeholder="Add a tag — trips/japan for nesting"
+    spellcheck="false"
+    autocomplete="off"
+    [attr.aria-expanded]="expanded()"
+    [attr.aria-controls]="listId"
+    [attr.aria-activedescendant]="activeId()"
+    [value]="text()"
+    (input)="onInput($event)"
+    (keydown)="onKeydown($event)"
+    (focus)="focused.set(true)"
+    (blur)="focused.set(false)"
+  />
+</div>
+@if (expanded()) {
+  <ul class="suggestions" role="listbox" [id]="listId">
+    @for (tag of suggestions(); track tag.id) {
+      <li role="option" [id]="`${listId}-${$index}`" [attr.aria-selected]="$index === active()">
+        <button
+          type="button"
+          tabindex="-1"
+          [class.active]="$index === active()"
+          (mousedown)="$event.preventDefault()"
+          (click)="commit(tag.path)"
+        >
+          <span class="path">{{ tag.path }}</span>
+          <span class="count">{{ tag.fileCount }}</span>
+        </button>
+      </li>
+    }
+  </ul>
+}

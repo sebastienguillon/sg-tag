@@ -1,0 +1,138 @@
+import { DatePipe } from '@angular/common';
+import {
+  Component,
+  computed,
+  DestroyRef,
+  inject,
+  resource,
+  signal,
+  viewChild,
+} from '@angular/core';
+import { createLogger } from '@shared/log';
+import type { TagRef, TagUsage } from '@shared/model';
+import { DESKTOP } from '../../core/desktop';
+import { LibraryStore } from '../../core/library-store';
+import { WorkerClient } from '../../core/worker-client';
+import { DurationPipe } from '../../ui/format/duration-pipe';
+import { FileSizePipe } from '../../ui/format/file-size-pipe';
+import { Icon } from '../../ui/icon/icon';
+import { TagInput } from '../tag-input/tag-input';
+
+const log = createLogger('details');
+
+const REVEAL_LABELS: Readonly<Record<string, string>> = {
+  darwin: 'Show in Finder',
+  win32: 'Show in Explorer',
+};
+
+/** Sidebar: metadata of the selected file, and tag editing for one or many files. */
+@Component({
+  selector: 'app-details-panel',
+  imports: [Icon, TagInput, DatePipe, FileSizePipe, DurationPipe],
+  templateUrl: './details-panel.html',
+  styleUrl: './details-panel.css',
+})
+export class DetailsPanel {
+  private readonly store = inject(LibraryStore);
+  private readonly worker = inject(WorkerClient);
+  private readonly platform = inject(DESKTOP).platform;
+
+  private readonly tagInput = viewChild(TagInput);
+  /** Bumped when tags or files change, to reload what is displayed. */
+  private readonly revision = signal(0);
+
+  protected readonly revealLabel = REVEAL_LABELS[this.platform] ?? 'Show in Folder';
+  protected readonly selectedIds = computed(() => [...this.store.selection()]);
+  protected readonly count = computed(() => this.selectedIds().length);
+  private readonly singleId = computed(() =>
+    this.count() === 1 ? this.selectedIds()[0] : undefined,
+  );
+
+  protected readonly details = resource({
+    params: () => {
+      const id = this.singleId();
+      return id === undefined ? undefined : { id, revision: this.revision() };
+    },
+    loader: ({ params }) => this.worker.call('getDetails', params.id),
+  });
+
+  private readonly selectionTags = resource({
+    params: () =>
+      this.count() > 1 ? { ids: this.selectedIds(), revision: this.revision() } : undefined,
+    loader: ({ params }) => this.worker.call('getSelectionTags', params.ids),
+  });
+
+  /** Tags on the selection, with how many of the selected files carry each. */
+  protected readonly tags = computed<readonly TagUsage[]>(() => {
+    if (this.count() === 1) {
+      return (this.details.value()?.tags ?? []).map((tag) => ({ ...tag, fileCount: 1 }));
+    }
+    return this.selectionTags.value() ?? [];
+  });
+  /** Tags every selected file already has: no point suggesting them. */
+  protected readonly completeTags = computed(
+    () =>
+      new Set(
+        this.tags()
+          .filter((tag) => tag.fileCount === this.count())
+          .map((tag) => tag.path),
+      ),
+  );
+  protected readonly thumbnailUrl = computed(() => {
+    const file = this.details.value();
+    return file ? `thumb://file/${file.id}?v=${file.mtimeMs}` : null;
+  });
+
+  constructor() {
+    const bump = (): void => {
+      this.revision.update((value) => value + 1);
+    };
+    const subscriptions = [
+      this.worker.on('tagsChanged', bump),
+      this.worker.on('filesChanged', ({ ids }) => {
+        const id = this.singleId();
+        if (ids === null || (id !== undefined && ids.includes(id))) {
+          bump();
+        }
+      }),
+      this.worker.on('mediaChanged', ({ ids }) => {
+        const id = this.singleId();
+        if (id !== undefined && ids.includes(id)) {
+          bump();
+        }
+      }),
+    ];
+    inject(DestroyRef).onDestroy(() => {
+      subscriptions.forEach((unsubscribe) => unsubscribe());
+    });
+  }
+
+  focusTagInput(): void {
+    this.tagInput()?.focus();
+  }
+
+  protected addTag(path: string): void {
+    this.worker.call('addTags', this.selectedIds(), [path]).catch((error: unknown) => {
+      log.error('Cannot add tag:', error);
+    });
+  }
+
+  protected removeTag(tag: TagRef): void {
+    this.worker.call('removeTags', this.selectedIds(), [tag.id]).catch((error: unknown) => {
+      log.error('Cannot remove tag:', error);
+    });
+  }
+
+  /** Clicking a tag searches for it. */
+  protected searchTag(tag: TagRef): void {
+    this.store.query.set(/[\s",]/.test(tag.path) ? `tag:"${tag.path}"` : `tag:${tag.path}`);
+  }
+
+  protected open(id: number): void {
+    this.store.open(id);
+  }
+
+  protected reveal(id: number): void {
+    this.store.reveal(id);
+  }
+}

@@ -1,0 +1,24 @@
+:host {
+  display: block;
+  min-height: 0;
+}
+
+.viewport {
+  height: 100%;
+  outline: none;
+}
+
+.viewport:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+/* Row height must equal the virtual scroll item size: gap above + tile. */
+.row {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: repeat(var(--columns), var(--tile-size));
+  grid-auto-rows: var(--tile-size);
+  gap: var(--gap);
+  height: calc(var(--tile-size) + var(--gap));
+  padding: var(--gap) var(--padding) 0;
+}

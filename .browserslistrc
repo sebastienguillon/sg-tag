@@ -1,0 +1,2 @@
+# The renderer only ever runs in Electron 44's Chromium.
+Chrome >= 152

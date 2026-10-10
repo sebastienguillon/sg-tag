@@ -1,0 +1,104 @@
+<header class="toolbar">
+  <a class="icon-button" routerLink="/" aria-label="Back to library" title="Back">
+    <app-icon name="arrow-left" />
+  </a>
+  <h1>Settings</h1>
+</header>
+
+<div class="page">
+  <section>
+    <h2>Library folders</h2>
+    <p class="lead">
+      Images and videos in these folders and all their subfolders are indexed and watched for
+      changes. Files are never modified: tags are stored in the app’s own database.
+    </p>
+
+    <ul class="roots">
+      @for (root of roots.value() ?? []; track root.id) {
+        <li class="root" [class.offline]="!root.online">
+          <app-icon class="root-icon" [name]="root.online ? 'folder-open' : 'hard-drive'" />
+          <div class="root-text">
+            <span class="root-path">{{ root.path }}</span>
+            <span class="root-stats">
+              {{ root.fileCount | number }} files · {{ root.taggedCount | number }} tagged
+              @if (!root.online) {
+                · <strong>offline</strong>: tags are kept until it is back
+              }
+            </span>
+          </div>
+          @if (confirming() === root.id) {
+            <div class="confirm">
+              <span>
+                Remove from the library?
+                @if (root.taggedCount > 0) {
+                  Tags on {{ root.taggedCount | number }} files will be lost.
+                }
+                Files on disk are not touched.
+              </span>
+              <button type="button" class="button" (click)="confirming.set(null)">Cancel</button>
+              <button
+                type="button"
+                class="button danger"
+                [disabled]="busy()"
+                (click)="remove(root)"
+              >
+                Remove
+              </button>
+            </div>
+          } @else {
+            <button
+              type="button"
+              class="icon-button"
+              title="Remove from library"
+              [attr.aria-label]="`Remove ${root.path}`"
+              (click)="confirming.set(root.id)"
+            >
+              <app-icon name="trash" />
+            </button>
+          }
+        </li>
+      } @empty {
+        <li class="none">No folders yet.</li>
+      }
+    </ul>
+
+    <button type="button" class="button primary" [disabled]="busy()" (click)="addFolder()">
+      <app-icon name="plus" /> Add folder…
+    </button>
+    @if (error(); as message) {
+      <p class="error" role="alert">{{ message }}</p>
+    }
+  </section>
+
+  <section>
+    <h2>Diagnostics</h2>
+    @if (diagnostics.value(); as info) {
+      <dl>
+        <dt>ffmpeg</dt>
+        <dd>
+          @if (info.ffmpeg; as path) {
+            <code>{{ path }}</code>
+          } @else {
+            <span class="warning">
+              Not found. Video thumbnails fall back to the system thumbnailer (macOS, Windows).
+            </span>
+          }
+        </dd>
+        <dt>ffprobe</dt>
+        <dd>
+          @if (info.ffprobe; as path) {
+            <code>{{ path }}</code>
+          } @else {
+            <span class="warning">Not found. Video duration and size are unavailable.</span>
+          }
+        </dd>
+        <dt>SQLite</dt>
+        <dd>{{ info.sqlite }}</dd>
+        <dt>Data folder</dt>
+        <dd>
+          <code>{{ info.dataDir }}</code>
+        </dd>
+      </dl>
+    }
+  </section>
+</div>

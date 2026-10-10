@@ -1,0 +1,102 @@
+<header class="toolbar">
+  <app-search-bar class="search" (leave)="focusGrid()" />
+  <div class="controls">
+    <label class="sort">
+      <span class="visually-hidden">Sort by</span>
+      <select [value]="sort().field" (change)="setSortField($event)">
+        <option value="modified">Date modified</option>
+        <option value="name">Name</option>
+        <option value="size">Size</option>
+      </select>
+    </label>
+    <button
+      type="button"
+      class="icon-button"
+      [attr.aria-label]="sort().direction === 'asc' ? 'Ascending' : 'Descending'"
+      [title]="sort().direction === 'asc' ? 'Ascending' : 'Descending'"
+      (click)="toggleSortDirection()"
+    >
+      <app-icon [name]="sort().direction === 'asc' ? 'sort-asc' : 'sort-desc'" />
+    </button>
+    <label class="tile-size" title="Thumbnail size">
+      <app-icon class="small" name="image" />
+      <input
+        type="range"
+        aria-label="Thumbnail size"
+        [min]="tileRange.min"
+        [max]="tileRange.max"
+        [step]="tileRange.step"
+        [value]="tileSize()"
+        (input)="setTileSize($event)"
+      />
+      <app-icon name="image" />
+    </label>
+    <button
+      type="button"
+      class="icon-button"
+      aria-label="Toggle details panel"
+      title="Details panel"
+      [class.active]="sidebarOpen()"
+      (click)="toggleSidebar()"
+    >
+      <app-icon name="panel" />
+    </button>
+    <a class="icon-button" routerLink="/settings" aria-label="Settings" title="Settings">
+      <app-icon name="settings" />
+    </a>
+  </div>
+</header>
+
+<div class="body">
+  <main class="content">
+    @switch (emptyState()) {
+      @case (null) {
+        <app-file-grid class="grid" (tagRequested)="focusTagInput()" />
+      }
+      @case ('loading') {
+        <div class="empty"></div>
+      }
+      @case ('no-folders') {
+        <div class="empty">
+          <app-icon class="empty-icon" name="folder-plus" />
+          <h2>Add the folders that hold your photos and videos</h2>
+          <p>Every image and video below them is indexed and kept up to date.</p>
+          <button type="button" class="button primary" (click)="addFolder()">
+            <app-icon name="plus" /> Add folder…
+          </button>
+          @if (addError(); as error) {
+            <p class="error">{{ error }}</p>
+          }
+        </div>
+      }
+      @case ('indexing') {
+        <div class="empty">
+          <app-icon class="empty-icon spin" name="loader" />
+          <h2>Indexing your folders…</h2>
+          <p>Files appear here as soon as they are found.</p>
+        </div>
+      }
+      @case ('no-files') {
+        <div class="empty">
+          <app-icon class="empty-icon" name="image" />
+          <h2>No images or videos found</h2>
+          <p><a routerLink="/settings">Check your library folders</a></p>
+        </div>
+      }
+      @case ('no-match') {
+        <div class="empty">
+          <app-icon class="empty-icon" name="search" />
+          <h2>No files match “{{ query() }}”</h2>
+          <p>Press <kbd>?</kbd> in the search field for the syntax.</p>
+        </div>
+      }
+    }
+  </main>
+  @if (sidebarOpen()) {
+    <aside class="sidebar" aria-label="Details">
+      <app-details-panel />
+    </aside>
+  }
+</div>
+
+<app-status-bar />
