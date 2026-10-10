@@ -1,0 +1,102 @@
+name: Release
+
+# Pushing a version tag (vYYYY.M.PATCH, optionally -alpha.N / -beta.N) builds the installers on
+# each OS and attaches them to a draft GitHub release, to be reviewed and published by hand.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Check tag against package.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: |
+          version="$(jq -r .version package.json)"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+            exit 1
+          fi
+
+  ci:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Package (${{ matrix.os }})
+    needs: ci
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+        with:
+          cache: true
+          require-lockfile: true
+      - run: pnpm package
+        env:
+          # Builds are not code-signed yet: don't look for signing identities.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installers-${{ runner.os }}
+          path: |
+            release/*.dmg
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
+          # Only a hand-off to the publish job; the release keeps the files.
+          retention-days: 1
+
+  publish:
+    name: Draft GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installers-*
+          path: installers
+          merge-multiple: true
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            # Re-run: replace the installers, keep the notes edited so far.
+            gh release upload "${GITHUB_REF_NAME}" installers/* --clobber
+            exit 0
+          fi
+          prerelease=()
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          cat > notes.md <<'NOTES'
+          > [!WARNING]
+          > These builds are not code-signed yet.
+          > - **macOS** (Apple silicon): if macOS reports that the app is damaged, run
+          >   `xattr -dr com.apple.quarantine "/Applications/SG Tag.app"` once after installing.
+          > - **Windows**: SmartScreen warns about an unrecognised app; choose *More info* → *Run anyway*.
+          > - Video thumbnails need `ffmpeg` and `ffprobe` on the system (e.g. `brew install ffmpeg`).
+          NOTES
+          gh release create "${GITHUB_REF_NAME}" installers/* \
+            --draft "${prerelease[@]}" --verify-tag \
+            --title "SG Tag ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md --generate-notes

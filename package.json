@@ -5,6 +5,14 @@
   "description": "Tag and retrieve local images and videos, fast.",
   "author": "Sébastien Guillon",
   "license": "UNLICENSED",
+  "homepage": "https://github.com/sebastienguillon/sg-tags",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sebastienguillon/sg-tags.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sebastienguillon/sg-tags/issues"
+  },
   "private": true,
   "type": "module",
   "main": "dist/electron/main.js",

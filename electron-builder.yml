@@ -7,6 +7,9 @@ directories:
   output: release
   buildResources: build
 
+# No spaces in file names: GitHub rewrites them in release assets.
+artifactName: ${name}-${version}-${os}-${arch}.${ext}
+
 files:
   - dist/**/*
   - package.json
@@ -27,6 +30,10 @@ mac:
   target: [dmg]
 win:
   target: [nsis]
+nsis:
+  artifactName: ${name}-${version}-${os}-${arch}-setup.${ext}
 linux:
   category: Graphics
   target: [AppImage, deb]
+  # Required by .deb packages. GitHub's no-reply address keeps a personal address out of them.
+  maintainer: Sébastien Guillon <1942471+sebastienguillon@users.noreply.github.com>
