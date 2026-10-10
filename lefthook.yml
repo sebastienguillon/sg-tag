@@ -1,6 +1,8 @@
 # Git hooks — https://lefthook.dev
 # Installed automatically by `pnpm install` (lefthook's postinstall).
 glob_matcher: doublestar
+# This repository does not use Git LFS: don't run its hooks even when git-lfs is installed.
+skip_lfs: true
 
 pre-commit:
   piped: true
