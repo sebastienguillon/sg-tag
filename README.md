@@ -67,8 +67,23 @@ byte-identical, which also means:
 - Folders on drives that are not connected are marked offline; their files and tags are kept, and
   their cached thumbnails stay browsable.
 
+## Releasing
+
+Versions follow calendar versioning, `YYYY.M.PATCH` (no zero-padding, PATCH restarts at 0 each
+month), with `-alpha.N` / `-beta.N` suffixes before a stable release.
+
+1. Set `version` in `package.json`, commit it as `chore(release): <version>`.
+2. Tag that commit `v<version>` (annotated) and push the branch and the tag.
+3. The **Release** workflow checks the tag against `package.json`, runs CI, builds the installers
+   on macOS, Windows and Linux, and attaches them to a **draft** GitHub release (marked as a
+   pre-release for `-alpha`/`-beta` versions).
+4. Review the draft and its notes on GitHub, then publish it.
+
 ## Conventions
 
 Conventional Commits, enforced by commitlint. Git hooks are managed by lefthook and installed by
 `pnpm install`: ESLint and Prettier on staged files before each commit, and type checks plus tests
 before each push.
+
+CI runs on every push to `master` and on pull requests: workflow lint (actionlint), format, lint
+and type checks, then tests and a build on Linux, macOS and Windows.
