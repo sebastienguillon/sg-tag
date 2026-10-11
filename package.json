@@ -4,7 +4,7 @@
   "version": "2026.10.0-alpha.1",
   "description": "Tag and retrieve local images and videos, fast.",
   "author": "Sébastien Guillon",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "homepage": "https://github.com/sebastienguillon/sg-tag",
   "repository": {
     "type": "git",
