@@ -1,5 +1,5 @@
 import type { Settings, SortDirection, SortField, SortOrder } from '@shared/model';
-import { DEFAULT_SETTINGS, TILE_SIZE } from '@shared/model';
+import { DEFAULT_SETTINGS, SIDEBAR_WIDTH, TILE_SIZE } from '@shared/model';
 import type { Db } from '../database/database';
 
 const SORT_FIELDS: readonly SortField[] = ['modified', 'name', 'size'];
@@ -28,7 +28,11 @@ export class SettingsRepository {
     const stored = new Map(
       this.statements.all.all().map(({ key, value }) => [key, JSON.parse(value) as unknown]),
     );
-    return sanitize({ tileSize: stored.get('tileSize'), sort: stored.get('sort') });
+    return sanitize({
+      tileSize: stored.get('tileSize'),
+      sort: stored.get('sort'),
+      sidebarWidth: stored.get('sidebarWidth'),
+    });
   }
 
   update(patch: Partial<Settings>): Settings {
@@ -42,18 +46,23 @@ export class SettingsRepository {
   }
 }
 
-function sanitize(input: { tileSize?: unknown; sort?: unknown }): Settings {
+function sanitize(input: { tileSize?: unknown; sort?: unknown; sidebarWidth?: unknown }): Settings {
   return {
-    tileSize: sanitizeTileSize(input.tileSize),
+    tileSize: sanitizeSize(input.tileSize, TILE_SIZE, DEFAULT_SETTINGS.tileSize),
     sort: sanitizeSort(input.sort),
+    sidebarWidth: sanitizeSize(input.sidebarWidth, SIDEBAR_WIDTH, DEFAULT_SETTINGS.sidebarWidth),
   };
 }
 
-function sanitizeTileSize(value: unknown): number {
+function sanitizeSize(
+  value: unknown,
+  range: { readonly min: number; readonly max: number },
+  fallback: number,
+): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return DEFAULT_SETTINGS.tileSize;
+    return fallback;
   }
-  return Math.min(TILE_SIZE.max, Math.max(TILE_SIZE.min, Math.round(value)));
+  return Math.min(range.max, Math.max(range.min, Math.round(value)));
 }
 
 function sanitizeSort(value: unknown): SortOrder {

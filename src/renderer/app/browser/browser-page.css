@@ -72,9 +72,9 @@ select {
 
 .sidebar {
   flex: none;
-  width: var(--sidebar-width);
+  /* The grid keeps room for a few tiles when the window is narrow. */
+  max-width: calc(100% - 320px);
   overflow-y: auto;
-  border-left: 1px solid var(--border);
   background: var(--surface);
 }
 

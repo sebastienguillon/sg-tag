@@ -93,7 +93,23 @@
     }
   </main>
   @if (sidebarOpen()) {
-    <aside class="sidebar" aria-label="Details">
+    <app-resize-handle
+      aria-label="Resize details panel"
+      aria-controls="details-sidebar"
+      [panel]="sidebar"
+      [min]="sidebarRange.min"
+      [max]="sidebarRange.max"
+      [step]="sidebarRange.step"
+      [defaultSize]="defaultSidebarWidth"
+      [(size)]="sidebarWidth"
+    />
+    <aside
+      #sidebar
+      id="details-sidebar"
+      class="sidebar"
+      aria-label="Details"
+      [style.width.px]="sidebarWidth()"
+    >
       <app-details-panel />
     </aside>
   }

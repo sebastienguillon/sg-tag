@@ -10,12 +10,13 @@ import {
 import { Router, RouterLink } from '@angular/router';
 import { createLogger } from '@shared/log';
 import type { SortField } from '@shared/model';
-import { TILE_SIZE } from '@shared/model';
+import { DEFAULT_SETTINGS, SIDEBAR_WIDTH, TILE_SIZE } from '@shared/model';
 import { DESKTOP } from '../core/desktop';
 import { LibraryStore } from '../core/library-store';
 import { PreferencesStore } from '../core/preferences-store';
 import { WorkerClient } from '../core/worker-client';
 import { Icon } from '../ui/icon/icon';
+import { ResizeHandle } from '../ui/resize-handle/resize-handle';
 import { DetailsPanel } from './details-panel/details-panel';
 import { FileGrid } from './file-grid/file-grid';
 import { SearchBar } from './search-bar/search-bar';
@@ -28,7 +29,7 @@ type EmptyState = 'loading' | 'no-folders' | 'indexing' | 'no-files' | 'no-match
 /** The main view: search, thumbnail grid, details sidebar. */
 @Component({
   selector: 'app-browser-page',
-  imports: [Icon, RouterLink, SearchBar, FileGrid, DetailsPanel, StatusBar],
+  imports: [Icon, RouterLink, SearchBar, FileGrid, DetailsPanel, StatusBar, ResizeHandle],
   templateUrl: './browser-page.html',
   styleUrl: './browser-page.css',
   host: { '(document:keydown)': 'onGlobalKeydown($event)' },
@@ -51,6 +52,9 @@ export class BrowserPage {
   protected readonly sort = this.preferences.sort;
   protected readonly query = this.store.query;
   protected readonly sidebarOpen = signal(true);
+  protected readonly sidebarRange = SIDEBAR_WIDTH;
+  protected readonly defaultSidebarWidth = DEFAULT_SETTINGS.sidebarWidth;
+  protected readonly sidebarWidth = this.preferences.sidebarWidth;
   protected readonly addError = signal<string | null>(null);
 
   private readonly roots = resource({

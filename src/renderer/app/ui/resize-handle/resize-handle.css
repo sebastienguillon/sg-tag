@@ -1,0 +1,35 @@
+:host {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 1px;
+  background: var(--border);
+  cursor: col-resize;
+  touch-action: none;
+  transition:
+    background-color 0.1s,
+    box-shadow 0.1s;
+}
+
+/* A wider, invisible grip, mostly over the panel to leave the neighbour's scrollbar alone. */
+:host::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px 0 -2px;
+}
+
+:host(:hover),
+:host(:focus-visible),
+:host(.dragging) {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Do not flash when the pointer merely crosses the grip. */
+:host(:hover) {
+  transition-delay: 0.15s;
+}
+
+:host(:focus-visible) {
+  outline: none;
+}

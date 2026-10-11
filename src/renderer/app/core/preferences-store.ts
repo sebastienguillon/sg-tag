@@ -15,11 +15,16 @@ export class PreferencesStore {
 
   readonly tileSize = signal(DEFAULT_SETTINGS.tileSize);
   readonly sort = signal<SortOrder>(DEFAULT_SETTINGS.sort);
+  readonly sidebarWidth = signal(DEFAULT_SETTINGS.sidebarWidth);
 
   constructor() {
-    // Persist changes, debounced (the size slider fires continuously).
+    // Persist changes, debounced (the size slider and sidebar splitter fire continuously).
     effect((onCleanup) => {
-      const patch = { tileSize: this.tileSize(), sort: this.sort() };
+      const patch = {
+        tileSize: this.tileSize(),
+        sort: this.sort(),
+        sidebarWidth: this.sidebarWidth(),
+      };
       if (!this.loaded()) {
         return;
       }
@@ -41,6 +46,7 @@ export class PreferencesStore {
     if (settings) {
       this.tileSize.set(settings.tileSize);
       this.sort.set(settings.sort);
+      this.sidebarWidth.set(settings.sidebarWidth);
     }
     this.loaded.set(true);
   }

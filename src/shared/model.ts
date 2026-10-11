@@ -86,6 +86,8 @@ export interface Settings {
   /** Target tile edge in CSS pixels; the grid stretches tiles to fill each row. */
   readonly tileSize: number;
   readonly sort: SortOrder;
+  /** Width of the details sidebar, in CSS pixels. */
+  readonly sidebarWidth: number;
 }
 
 export interface Diagnostics {
@@ -97,10 +99,13 @@ export interface Diagnostics {
 
 export const TILE_SIZE = { min: 96, max: 320, step: 8 } as const;
 
+export const SIDEBAR_WIDTH = { min: 240, max: 640, step: 16 } as const;
+
 /** Long edge of stored thumbnails, in pixels: the largest tile on a 2× display, roughly. */
 export const THUMBNAIL_EDGE = 512;
 
 export const DEFAULT_SETTINGS: Settings = {
   tileSize: 176,
   sort: { field: 'modified', direction: 'desc' },
+  sidebarWidth: 300,
 };
