@@ -19,18 +19,25 @@ Tag and retrieve the images and videos on your computer, fast. macOS, Windows an
 
 ## Scripts
 
-| Command                   | What it does                                                             |
-| ------------------------- | ------------------------------------------------------------------------ |
-| `pnpm dev`                | Angular dev server + Electron, restarted when Electron-side code changes |
-| `pnpm start`              | Production build, then run it                                            |
-| `pnpm build`              | Renderer (Angular CLI) and Electron side (esbuild) into `dist/`          |
-| `pnpm package[:dir]`      | Installers (or an unpacked app) in `release/`                            |
-| `pnpm test`               | Renderer tests (`ng test`, Vitest) and Electron-side tests (Vitest)      |
-| `pnpm lint` / `typecheck` | ESLint (type-aware, both sides) / every TypeScript project               |
+| Command                                | What it does                                                                             |
+| -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `pnpm dev`                             | Angular dev server + Electron: UI edits reload live, Electron-side edits restart the app |
+| `pnpm start`                           | Production build, then run it **on your real library**                                   |
+| `pnpm build`                           | Renderer (Angular CLI) and Electron side (esbuild) into `dist/`                          |
+| `pnpm package[:dir]`                   | Installers (or an unpacked app) in `release/`                                            |
+| `pnpm test`                            | Renderer tests (`ng test`, Vitest) and Electron-side tests (Vitest)                      |
+| `pnpm test:renderer` / `test:electron` | One half of `pnpm test`                                                                  |
+| `pnpm lint` / `typecheck`              | ESLint (type-aware, both sides) / every TypeScript project                               |
+| `pnpm lint:fix`                        | ESLint, applying its automatic fixes                                                     |
+| `pnpm format` / `format:check`         | Prettier: rewrite files / only report them, as CI does                                   |
 
-`pnpm dev` uses a separate profile in `.dev-data/` and port 4317 (`SG_TAG_USER_DATA`,
-`SG_TAG_DEV_PORT` override them). Electron-side tests run on Electron's own Node runtime, so native
-addons are tested exactly as they ship.
+`pnpm dev` keeps its own data folder in `.dev-data/` and serves the UI on port 4317; quitting the
+app, or Ctrl-C in the terminal, ends the session. `pnpm start` uses the installed app's data folder,
+with your real tags. `SG_TAG_USER_DATA` points either command at another data folder
+(`SG_TAG_USER_DATA=.dev-data pnpm start`), and `SG_TAG_DEV_PORT` changes the port.
+
+Electron-side tests run on Electron's own Node runtime, so native addons are tested exactly as they
+ship.
 
 ## Architecture
 

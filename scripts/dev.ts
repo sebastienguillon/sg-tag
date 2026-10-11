@@ -74,7 +74,7 @@ function launch(): void {
   });
   electron = child;
   child.on('exit', () => {
-    // Closing the app window ends the dev session; a restart replaces the child first.
+    // Quitting the app ends the dev session; a restart replaces the child first.
     if (electron === child) {
       void shutdown(0);
     }
