@@ -9,12 +9,16 @@
   </div>
 } @else {
   @if (count() === 1) {
-    @if (details.value(); as file) {
-      <div class="preview">
-        @if (thumbnailUrl(); as url) {
-          <img alt="" [src]="url" />
+    @if (file(); as file) {
+      @if (thumbnailUrl(); as url) {
+        @if (file.kind === 'video') {
+          <app-video-preview class="preview" [file]="file" [poster]="url" />
+        } @else {
+          <div class="preview">
+            <img alt="" [src]="url" />
+          </div>
         }
-      </div>
+      }
       <h2 class="title" [title]="file.name">{{ file.name }}</h2>
       <div class="actions">
         <button type="button" class="button" (click)="open(file.id)">
@@ -72,7 +76,7 @@
   </section>
 
   @if (count() === 1) {
-    @if (details.value(); as file) {
+    @if (file(); as file) {
       <dl class="meta">
         <dt>Type</dt>
         <dd>{{ file.kind === 'video' ? 'Video' : 'Image' }} · {{ file.format }}</dd>

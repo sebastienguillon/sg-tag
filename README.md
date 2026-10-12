@@ -4,6 +4,8 @@ Tag and retrieve the images and videos on your computer, fast. macOS, Windows an
 
 - Indexes every image and video below the library folders you choose, and keeps the index live.
 - Virtualised thumbnail grid with adjustable size; the type of each file is shown on its tile.
+- Videos play in the details panel when Chromium can decode them (H.264, VP9, AV1, and HEVC where
+  the platform decodes it); Open hands any other format to the system player.
 - Search filters on every keystroke: names, folders, tags, and operators (`tag:`, `type:`, `ext:`,
   `size:`, `in:`, `is:`). Press `?` in the search field for the syntax.
 - Hierarchical tags (`trips/2024/japan`). Searching `tag:trips` includes everything below it.

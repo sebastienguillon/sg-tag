@@ -188,6 +188,9 @@ function prepareStatements(db: Db) {
       'SELECT COUNT(*) AS count FROM files WHERE missing_since IS NULL',
     ),
     pathOf: db.prepare<[number], { path: string }>('SELECT path FROM files WHERE id = ?'),
+    videoPathOf: db.prepare<[number], { path: string }>(
+      "SELECT path FROM files WHERE id = ? AND kind = 'video' AND missing_since IS NULL",
+    ),
     idsForRoot: db.prepare<[number], { id: number }>('SELECT id FROM files WHERE root_id = ?'),
   };
 }
@@ -333,6 +336,11 @@ export class FilesRepository {
 
   pathOf(id: number): string | null {
     return this.statements.pathOf.get(id)?.path ?? null;
+  }
+
+  /** Path of a video that is on disk, or `null`: the only files the renderer may stream. */
+  videoPathOf(id: number): string | null {
+    return this.statements.videoPathOf.get(id)?.path ?? null;
   }
 
   idsForRoot(rootId: number): number[] {

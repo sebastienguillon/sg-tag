@@ -4,12 +4,13 @@ import {
   computed,
   DestroyRef,
   inject,
+  linkedSignal,
   resource,
   signal,
   viewChild,
 } from '@angular/core';
 import { createLogger } from '@shared/log';
-import type { TagRef, TagUsage } from '@shared/model';
+import type { FileDetails, TagRef, TagUsage } from '@shared/model';
 import { DESKTOP } from '../../core/desktop';
 import { LibraryStore } from '../../core/library-store';
 import { WorkerClient } from '../../core/worker-client';
@@ -17,6 +18,7 @@ import { DurationPipe } from '../../ui/format/duration-pipe';
 import { FileSizePipe } from '../../ui/format/file-size-pipe';
 import { Icon } from '../../ui/icon/icon';
 import { TagInput } from '../tag-input/tag-input';
+import { VideoPreview } from '../video-preview/video-preview';
 
 const log = createLogger('details');
 
@@ -28,7 +30,7 @@ const REVEAL_LABELS: Readonly<Record<string, string>> = {
 /** Sidebar: metadata of the selected file, and tag editing for one or many files. */
 @Component({
   selector: 'app-details-panel',
-  imports: [Icon, TagInput, DatePipe, FileSizePipe, DurationPipe],
+  imports: [Icon, TagInput, VideoPreview, DatePipe, FileSizePipe, DurationPipe],
   templateUrl: './details-panel.html',
   styleUrl: './details-panel.css',
 })
@@ -48,12 +50,29 @@ export class DetailsPanel {
     this.count() === 1 ? this.selectedIds()[0] : undefined,
   );
 
-  protected readonly details = resource({
+  private readonly details = resource({
     params: () => {
       const id = this.singleId();
       return id === undefined ? undefined : { id, revision: this.revision() };
     },
     loader: ({ params }) => this.worker.call('getDetails', params.id),
+  });
+  /**
+   * The details on display. While they reload after a change (a tag added, the file modified), the
+   * previous ones stay up: the panel does not blink, and a playing video keeps playing.
+   */
+  protected readonly file = linkedSignal<
+    { id: number | undefined; details: FileDetails | null | undefined },
+    FileDetails | null | undefined
+  >({
+    source: () => ({
+      id: this.singleId(),
+      details: this.details.hasValue() ? this.details.value() : undefined,
+    }),
+    computation: ({ id, details }, previous) => {
+      const shown = previous?.value;
+      return details === undefined && shown?.id === id ? shown : details;
+    },
   });
 
   private readonly selectionTags = resource({
@@ -65,7 +84,7 @@ export class DetailsPanel {
   /** Tags on the selection, with how many of the selected files carry each. */
   protected readonly tags = computed<readonly TagUsage[]>(() => {
     if (this.count() === 1) {
-      return (this.details.value()?.tags ?? []).map((tag) => ({ ...tag, fileCount: 1 }));
+      return (this.file()?.tags ?? []).map((tag) => ({ ...tag, fileCount: 1 }));
     }
     return this.selectionTags.value() ?? [];
   });
@@ -79,7 +98,7 @@ export class DetailsPanel {
       ),
   );
   protected readonly thumbnailUrl = computed(() => {
-    const file = this.details.value();
+    const file = this.file();
     return file ? `thumb://file/${file.id}?v=${file.mtimeMs}` : null;
   });
 

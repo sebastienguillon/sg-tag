@@ -52,6 +52,8 @@ export interface WorkerHostApi {
   /** Stores a thumbnail rendered by the OS (PNG bytes), or records that none could be made. */
   readonly storeThumbnail: (id: number, png: Uint8Array | null) => string | null;
   readonly resolvePath: (id: number) => string | null;
+  /** Path of an indexed video that is on disk, for streaming to the renderer; `null` otherwise. */
+  readonly videoPath: (id: number) => string | null;
   readonly shutdown: () => void;
 }
 

@@ -53,6 +53,10 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 - Details panel (resizable) for the selected file: preview, metadata, location, Open and Show in
   Finder/Explorer; tag editing for one file or a multi-file selection, showing partial tags as
   `n/total`.
+- Video preview: the details panel plays a video in place, on request, when Chromium decodes it
+  (H.264, VP9, AV1, and HEVC where the platform decodes it, in MP4, MOV, MKV or WebM). Guardrail:
+  **SG Tag previews; real playback belongs to the system player.** No transcoding and no player
+  features beyond the built-in controls; other formats go to Open.
 - Hierarchical tags separated by `/` (`trips/2024/japan`); `tag:trips` matches everything below.
 - Search syntax: free text, `"exact phrase"`, `tag:`, `type:`, `ext:`, `size:`, `in:`, `is:`
   (`untagged`, `tagged`, `missing`, `offline`), and a leading `-` to exclude.

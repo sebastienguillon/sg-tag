@@ -81,6 +81,7 @@ export class Library {
     thumbnail: (id) => this.thumbnails.thumbnail(id),
     storeThumbnail: (id, png) => this.thumbnails.storeSystemThumbnail(id, png),
     resolvePath: (id) => this.files.pathOf(id),
+    videoPath: (id) => this.files.videoPathOf(id),
     shutdown: () => this.stop(),
   };
 

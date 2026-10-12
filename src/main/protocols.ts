@@ -7,6 +7,7 @@ import { nativeImage, net, protocol } from 'electron';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { fileResponse } from './file-response';
 import type { WorkerHost } from './worker-host';
 
 const log = createLogger('protocols');
@@ -16,7 +17,7 @@ export const APP_ORIGIN = 'app://bundle';
 
 /**
  * Content Security Policy of the renderer. Component styles are injected at runtime, hence
- * `'unsafe-inline'` for styles only. Thumbnails come from the `thumb:` scheme.
+ * `'unsafe-inline'` for styles only. Thumbnails come from the `thumb:` scheme, videos from `media:`.
  */
 export function contentSecurityPolicy(devServer: string | null): string {
   const connect = devServer === null ? "'self'" : `'self' ${devServer.replace(/^http/, 'ws')}`;
@@ -25,6 +26,7 @@ export function contentSecurityPolicy(devServer: string | null): string {
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' thumb: data:",
+    'media-src media:',
     "font-src 'self'",
     `connect-src ${connect}`,
     "object-src 'none'",
@@ -42,12 +44,15 @@ export function registerSchemes(): void {
       privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true },
     },
     { scheme: 'thumb', privileges: { standard: true, secure: true } },
+    // `stream` lets the player start before the whole file is read, and seek with byte ranges.
+    { scheme: 'media', privileges: { standard: true, secure: true, stream: true } },
   ]);
 }
 
 export function handleProtocols(worker: WorkerHost, rendererRoot: string): void {
   protocol.handle('app', (request) => serveApp(request, rendererRoot));
   protocol.handle('thumb', (request) => serveThumbnail(request, worker));
+  protocol.handle('media', (request) => serveVideo(request, worker));
 }
 
 /** Serves the built Angular app, falling back to `index.html` for client-side routes. */
@@ -75,10 +80,16 @@ const NOT_FOUND = (): Response => new Response(null, { status: 404 });
 /** OS thumbnailers are heavy; a few at a time is plenty. */
 const systemThumbnails = createLimiter(4);
 
+/** The file id in `<scheme>://file/<id>` URLs, or `null`. */
+function fileId(request: Request): number | null {
+  const id = Number(new URL(request.url).pathname.slice(1));
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 /** `thumb://file/<id>?v=<mtime>`: the version only busts the renderer's image cache. */
 async function serveThumbnail(request: Request, worker: WorkerHost): Promise<Response> {
-  const id = Number(new URL(request.url).pathname.slice(1));
-  if (!Number.isSafeInteger(id) || id <= 0) {
+  const id = fileId(request);
+  if (id === null) {
     return NOT_FOUND();
   }
   const source = await worker.call('thumbnail', id).catch((error: unknown): ThumbnailSource => {
@@ -98,6 +109,26 @@ async function serveThumbnail(request: Request, worker: WorkerHost): Promise<Res
     case 'none':
       return NOT_FOUND();
   }
+}
+
+const VIDEO_TYPES: Readonly<Record<string, string>> = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.qt': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.mkv': 'video/x-matroska',
+};
+
+/** `media://file/<id>?v=<mtime>`: an indexed video, never any other file. */
+async function serveVideo(request: Request, worker: WorkerHost): Promise<Response> {
+  const id = fileId(request);
+  const file = id === null ? null : await worker.call('videoPath', id).catch(() => null);
+  if (file === null) {
+    return NOT_FOUND();
+  }
+  const type = VIDEO_TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream';
+  return fileResponse(file, request.headers.get('Range'), type);
 }
 
 /** QuickLook (macOS) / Shell thumbnails (Windows): HEIC, camera RAW, codecs ffmpeg lacks… */

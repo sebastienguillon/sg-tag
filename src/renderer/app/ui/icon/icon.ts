@@ -18,7 +18,8 @@ export type IconName =
   | 'loader'
   | 'sort-desc'
   | 'sort-asc'
-  | 'panel';
+  | 'panel'
+  | 'play';
 
 /** A symbol from the sprite rendered once by `IconSprite`; sized by `font-size`, coloured by `color`. */
 @Component({
