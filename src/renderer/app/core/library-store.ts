@@ -175,6 +175,20 @@ export class LibraryStore {
     });
   }
 
+  /** Moves a file that has an identical copy to the Trash; rejects with a readable message. */
+  async trash(id: number): Promise<void> {
+    try {
+      await this.desktop.trashFile(id);
+    } catch (error) {
+      log.warn('Cannot move file to the Trash:', error);
+      // Electron prefixes errors thrown in the main process with the channel name.
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(message.replace(/^Error invoking remote method '[^']*': (?:Error: )?/, ''), {
+        cause: error,
+      });
+    }
+  }
+
   private search(request: SearchRequest): void {
     if (this.inFlight) {
       this.queued = request;

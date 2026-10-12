@@ -5,10 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RootRecord } from '../library/roots-repository';
 import type { TestLibrary } from '../testing/test-library';
 import { createTestLibrary } from '../testing/test-library';
-import { crawl, statFiles } from './crawler';
+import type { DiskFile } from './crawler';
+import { crawl, statFile, statFiles } from './crawler';
 import { fingerprint } from './fingerprint';
 import type { ChangeSet } from './reconciler';
-import { Reconciler } from './reconciler';
+import { MOVE_WINDOW_MS, Reconciler } from './reconciler';
 
 describe('Reconciler', () => {
   let dir: string;
@@ -26,6 +27,21 @@ describe('Reconciler', () => {
   const idOf = (relative: string): number | undefined =>
     library.files.findByPath(file(relative))?.id;
   const details = (id: number) => library.files.details(id, new Set());
+  const tagsOf = (id: number): string[] => library.tags.forFile(id).map((tag) => tag.path);
+  /** What the watcher reports for a path that exists. */
+  const stat = async (absolute: string): Promise<DiskFile> => {
+    const disk = await statFile(absolute);
+    if (!disk) {
+      throw new Error(`${absolute} is not on disk`);
+    }
+    return disk;
+  };
+  const storeFingerprint = async (relative: string): Promise<void> => {
+    const known = library.files.findByPath(file(relative));
+    if (known) {
+      library.files.setFingerprint(known, await fingerprint(known.path, known.size));
+    }
+  };
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'sg-tag-'));
@@ -38,7 +54,7 @@ describe('Reconciler', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('indexes media files only, and forgets untagged files that disappear', async () => {
+  it('indexes media files only, and forgets untagged files a while after they disappear', async () => {
     await write('a.jpg');
     await write('clips/b.MP4');
     await write('notes.txt');
@@ -56,8 +72,21 @@ describe('Reconciler', () => {
 
     const b = idOf('clips/b.MP4');
     await rm(file('clips/b.MP4'));
-    expect((await scan()).deleted).toEqual([b]);
+    expect((await scan()).changed).toEqual([b]);
     expect(library.files.count()).toBe(1);
+    expect(reconciler.sweep().deleted).toEqual([]);
+    expect(reconciler.sweep(Date.now() + MOVE_WINDOW_MS + 1).deleted).toEqual([b]);
+  });
+
+  it('keeps the id of an untagged file that is renamed', async () => {
+    await write('a.jpg');
+    await scan();
+    const id = idOf('a.jpg');
+
+    await rename(file('a.jpg'), file('b.jpg'));
+    await scan();
+
+    expect(idOf('b.jpg')).toBe(id);
   });
 
   it('keeps id and tags of a tagged file renamed and moved on the same volume', async () => {
@@ -96,7 +125,7 @@ describe('Reconciler', () => {
     await scan();
     const id = idOf('a.jpg') ?? 0;
     library.tags.addToFiles([id], ['keep']);
-    library.files.setFingerprint(id, await fingerprint(file('a.jpg'), 'unique content'.length));
+    await storeFingerprint('a.jpg');
 
     await copyFile(file('a.jpg'), file('copy.jpg'));
     await rm(file('a.jpg'));
@@ -111,7 +140,7 @@ describe('Reconciler', () => {
     await scan();
     const id = idOf('a.jpg') ?? 0;
     library.tags.addToFiles([id], ['keep']);
-    library.files.setFingerprint(id, await fingerprint(file('a.jpg'), 4));
+    await storeFingerprint('a.jpg');
 
     await rm(file('a.jpg'));
     await write('b.jpg', 'bbbb');
@@ -119,6 +148,114 @@ describe('Reconciler', () => {
 
     expect(idOf('b.jpg')).not.toBe(id);
     expect(details(id)?.missing).toBe(true);
+  });
+
+  it('recognises a file whose copy was seen before the original vanished', async () => {
+    await write('a.jpg', 'unique content');
+    await scan();
+    const id = idOf('a.jpg') ?? 0;
+    library.tags.addToFiles([id], ['keep']);
+    await storeFingerprint('a.jpg');
+
+    // A move to another drive: the copy is created, and tagged meanwhile, then the source deleted.
+    await copyFile(file('a.jpg'), file('copy.jpg'));
+    await reconciler.applyPaths(root, [await stat(file('copy.jpg'))], []);
+    const copy = idOf('copy.jpg') ?? 0;
+    library.tags.addToFiles([copy], ['copied']);
+    await rm(file('a.jpg'));
+    const changes = await reconciler.applyPaths(root, [], [file('a.jpg')]);
+
+    expect(idOf('copy.jpg')).toBe(id);
+    expect(tagsOf(id)).toEqual(['copied', 'keep']);
+    expect(details(id)?.missing).toBe(false);
+    expect(changes.deleted).toEqual([copy]);
+  });
+
+  it('recognises a copy that was still being written when its source vanished', async () => {
+    await write('a.jpg', 'unique content');
+    await scan();
+    const id = idOf('a.jpg') ?? 0;
+    library.tags.addToFiles([id], ['keep']);
+    await storeFingerprint('a.jpg');
+
+    await writeFile(file('copy.jpg'), 'unique');
+    await reconciler.applyPaths(root, [await stat(file('copy.jpg'))], []);
+    await rm(file('a.jpg'));
+    await reconciler.applyPaths(root, [], [file('a.jpg')]);
+    expect(details(id)?.missing).toBe(true);
+
+    await writeFile(file('copy.jpg'), 'unique content');
+    await reconciler.applyPaths(root, [await stat(file('copy.jpg'))], []);
+
+    expect(idOf('copy.jpg')).toBe(id);
+    expect(tagsOf(id)).toEqual(['keep']);
+  });
+
+  it('follows moves between library folders, whichever watcher reports first', async () => {
+    const otherDir = await mkdtemp(path.join(os.tmpdir(), 'sg-tag-other-'));
+    try {
+      const other = library.roots.insert(otherDir);
+      await write('first.jpg', 'first');
+      await write('second.jpg', 'second');
+      await scan();
+      const first = idOf('first.jpg') ?? 0;
+      const second = idOf('second.jpg') ?? 0;
+
+      // The destination's watcher reports first…
+      await rename(file('first.jpg'), path.join(otherDir, 'first.jpg'));
+      await reconciler.applyPaths(other, [await stat(path.join(otherDir, 'first.jpg'))], []);
+      await reconciler.applyPaths(root, [], [file('first.jpg')]);
+      // …or the source's.
+      await rename(file('second.jpg'), path.join(otherDir, 'second.jpg'));
+      await reconciler.applyPaths(root, [], [file('second.jpg')]);
+      await reconciler.applyPaths(other, [await stat(path.join(otherDir, 'second.jpg'))], []);
+
+      expect(library.files.findByPath(path.join(otherDir, 'first.jpg'))?.id).toBe(first);
+      expect(library.files.findByPath(path.join(otherDir, 'second.jpg'))?.id).toBe(second);
+      expect(library.files.count()).toBe(2);
+    } finally {
+      await rm(otherDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps tagged files that vanished when untagged ones are forgotten', async () => {
+    await write('a.jpg');
+    await scan();
+    const id = idOf('a.jpg') ?? 0;
+    library.tags.addToFiles([id], ['keep']);
+    await rm(file('a.jpg'));
+    await scan();
+
+    expect(reconciler.sweep(Date.now() + MOVE_WINDOW_MS + 1).deleted).toEqual([]);
+    expect(details(id)?.missing).toBe(true);
+  });
+
+  it('drops a file the app deletes, rather than taking it for moved to its copy', async () => {
+    await write('a.jpg', 'same content');
+    await write('copy.jpg', 'same content');
+    await scan();
+    const id = idOf('a.jpg') ?? 0;
+    const copy = idOf('copy.jpg');
+    library.tags.addToFiles([id], ['keep']);
+    await storeFingerprint('a.jpg');
+
+    reconciler.expectDeletion(id);
+    await rm(file('a.jpg'));
+    const changes = await reconciler.applyPaths(root, [], [file('a.jpg')]);
+
+    expect(changes.deleted).toEqual([id]);
+    expect(idOf('copy.jpg')).toBe(copy);
+  });
+
+  it('forgets a file deleted by the app, unless a file is back at its path', async () => {
+    await write('a.jpg');
+    await scan();
+    const id = idOf('a.jpg') ?? 0;
+
+    expect((await reconciler.forget(id)).deleted).toEqual([]);
+    await rm(file('a.jpg'));
+    expect((await reconciler.forget(id)).deleted).toEqual([id]);
+    expect(details(id)).toBeNull();
   });
 
   it('applies watcher deletions of whole folders', async () => {
@@ -129,7 +266,7 @@ describe('Reconciler', () => {
     await rm(file('trip'), { recursive: true });
 
     const changes = await reconciler.applyPaths(root, [], [file('trip')]);
-    expect(changes.deleted).toHaveLength(2);
+    expect(changes.changed).toHaveLength(2);
     expect(library.files.count()).toBe(1);
   });
 });

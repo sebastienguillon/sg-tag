@@ -26,12 +26,15 @@ and nothing about the files on disk changes.
 Four commitments define SG Tag, and future work must not trade any of them away:
 
 - **Files are never modified.** Tags live only in the app's own database (`library.db` in the data
-  folder): no sidecar files, no metadata written into files.
+  folder): no sidecar files, no metadata written into files. The one change SG Tag makes on disk is
+  moving a duplicate to the Trash, when the user asks, after checking that an identical copy stays
+  on disk and giving it the duplicate's tags.
 - **Speed.** Search filters on every keystroke, and stays instant on large libraries.
 - **Folders as they are.** No import and no managed library: SG Tag indexes existing folders in
-  place, watches them, and adapts to the file system rather than reorganising it. Files renamed or
-  moved outside the app keep their tags; tagged files that disappear are kept as missing; folders on
-  disconnected drives stay browsable as offline.
+  place, watches them, and adapts to the file system rather than reorganising it. A file renamed or
+  moved outside the app, within or between library folders, stays the same file (same tags and
+  thumbnail); tagged files that disappear are kept as missing; folders on disconnected drives stay
+  browsable as offline.
 - **Keyboard-first.** Searching, selecting, tagging and navigating all work without the mouse.
 
 ## Operating Context
@@ -53,13 +56,17 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 - Details panel (resizable) for the selected file: preview, metadata, location, Open and Show in
   Finder/Explorer; tag editing for one file or a multi-file selection, showing partial tags as
   `n/total`.
+- Duplicates: files with byte-identical content. Find duplicates checks the whole library on
+  request, and tagging a file checks it; `is:duplicate` lists them side by side. The details panel
+  lists a file's identical copies, can give all copies the same tags, and moves a chosen copy to the
+  Trash. Checks compare size, then a fingerprint, and read whole files only for likely copies.
 - Video preview: the details panel plays a video in place, on request, when Chromium decodes it
   (H.264, VP9, AV1, and HEVC where the platform decodes it, in MP4, MOV, MKV or WebM). Guardrail:
   **SG Tag previews; real playback belongs to the system player.** No transcoding and no player
   features beyond the built-in controls; other formats go to Open.
 - Hierarchical tags separated by `/` (`trips/2024/japan`); `tag:trips` matches everything below.
 - Search syntax: free text, `"exact phrase"`, `tag:`, `type:`, `ext:`, `size:`, `in:`, `is:`
-  (`untagged`, `tagged`, `missing`, `offline`), and a leading `-` to exclude.
+  (`untagged`, `tagged`, `missing`, `offline`, `duplicate`), and a leading `-` to exclude.
 - Keyboard: ⌘/Ctrl-F or `/` to search, `T` to tag the selection, ⌘/Ctrl-, for Settings, and grid
   navigation and selection from the keyboard.
 - Settings: library folders (add, remove, file and tagged counts, offline state) and diagnostics.

@@ -1,6 +1,5 @@
-import { mapLimit } from '@shared/async';
 import { createLogger } from '@shared/log';
-import type { Diagnostics, IndexStatus, LibraryRoot } from '@shared/model';
+import type { Diagnostics, FileCopy, IndexStatus, LibraryRoot } from '@shared/model';
 import type { Channel, RpcHandlers } from '@shared/rpc';
 import { errorMessage, RpcServer } from '@shared/rpc';
 import type { LibraryApi, LibraryEvents, WorkerHostApi } from '@shared/worker-api';
@@ -8,10 +7,13 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { Db } from './database/database';
 import { openDatabase } from './database/database';
-import { fingerprint } from './indexer/fingerprint';
+import { DuplicateFinder } from './duplicates/duplicate-finder';
+import { statFile } from './indexer/crawler';
+import { Fingerprinter } from './indexer/fingerprinter';
 import { Indexer } from './indexer/indexer';
 import type { ChangeSet } from './indexer/reconciler';
 import { Reconciler } from './indexer/reconciler';
+import type { ContentCandidate } from './library/files-repository';
 import { FilesRepository } from './library/files-repository';
 import type { RootRecord } from './library/roots-repository';
 import { RootsRepository } from './library/roots-repository';
@@ -43,18 +45,30 @@ export class Library {
     getFiles: (ids) => this.files.summaries(ids, this.offlineRoots()),
     getDetails: (id) => {
       const details = this.files.details(id, this.offlineRoots());
-      return details && { ...details, tags: this.tags.forFile(id) };
+      return details && { ...details, tags: this.tags.forFile(id), copies: this.copiesOf(id) };
     },
     getSelectionTags: (ids) => this.tags.forSelection(ids),
     listTags: () => this.tags.list(),
     addTags: (fileIds, tagPaths) => {
       this.tags.addToFiles(fileIds, tagPaths);
       this.broadcast('tagsChanged', null);
-      this.fingerprintTagged(fileIds);
+      this.fingerprinter.prioritize(fileIds);
+      // Tagging a file is a good time to find out it has a copy; usually no file has its size.
+      this.duplicates.check(fileIds).catch((error: unknown) => {
+        log.warn('Duplicate check failed:', errorMessage(error));
+      });
     },
     removeTags: (fileIds, tagIds) => {
       this.tags.removeFromFiles(fileIds, tagIds);
       this.broadcast('tagsChanged', null);
+    },
+    findDuplicates: () => this.duplicates.checkLibrary(),
+    shareTagsWithCopies: (fileId) => {
+      const group = this.files.contentGroup(fileId).map((copy) => copy.id);
+      if (group.length > 1) {
+        this.tags.copyTags(group, group);
+        this.broadcast('tagsChanged', null);
+      }
     },
     listRoots: () => this.roots.list().map((root) => this.describeRoot(root)),
     addRoot: async (rootPath) => {
@@ -82,6 +96,8 @@ export class Library {
     storeThumbnail: (id, png) => this.thumbnails.storeSystemThumbnail(id, png),
     resolvePath: (id) => this.files.pathOf(id),
     videoPath: (id) => this.files.videoPathOf(id),
+    prepareTrash: (id) => this.prepareTrash(id),
+    forgetFile: (id) => this.indexer.forget(id),
     shutdown: () => this.stop(),
   };
 
@@ -94,6 +110,8 @@ export class Library {
   private readonly searchService: SearchService;
   private readonly indexer: Indexer;
   private readonly thumbnails: Thumbnailer;
+  private readonly fingerprinter: Fingerprinter;
+  private readonly duplicates: DuplicateFinder;
   private readonly tools: MediaTools;
   private readonly renderers = new Set<RpcServer<LibraryApi, LibraryEvents>>();
   private readonly changedIds = new Set<number>();
@@ -131,6 +149,21 @@ export class Library {
       onRendered: (id) => {
         this.markRendered(id);
         this.scheduleStatus();
+        this.fingerprinter.wake();
+      },
+    });
+    this.fingerprinter = new Fingerprinter({
+      files: this.files,
+      offlineRootIds: () => this.indexer.offlineRootIds,
+    });
+    this.duplicates = new DuplicateFinder({
+      files: this.files,
+      isOnline: (rootId) => this.indexer.isOnline(rootId),
+      onHashed: (ids) => {
+        this.markChanged(ids);
+      },
+      onProgress: () => {
+        this.scheduleStatus();
       },
     });
     if (this.tools.ffmpeg === null) {
@@ -141,6 +174,7 @@ export class Library {
   async start(): Promise<void> {
     await this.indexer.start();
     this.thumbnails.startBackground();
+    this.fingerprinter.startBackground();
   }
 
   async stop(): Promise<void> {
@@ -148,6 +182,7 @@ export class Library {
     clearTimeout(this.mediaChangedTimer);
     clearTimeout(this.statusTimer);
     this.thumbnails.stop();
+    this.fingerprinter.stop();
     await this.indexer.stop();
     for (const server of this.renderers) {
       server.dispose();
@@ -169,7 +204,8 @@ export class Library {
     this.markChanged(changes.changed);
     this.markChanged(changes.deleted);
     this.thumbnails.wake();
-    this.fingerprintTagged(changes.changed);
+    this.fingerprinter.prioritize(changes.changed);
+    this.fingerprinter.wake(changes.changed);
     this.scheduleStatus();
     this.thumbnails.remove(changes.deleted).catch((error: unknown) => {
       log.warn('Cannot delete cached thumbnails:', errorMessage(error));
@@ -183,6 +219,7 @@ export class Library {
       this.lastOffline = offline;
       this.markChanged(null);
       this.broadcast('rootsChanged', null);
+      this.fingerprinter.retryFailed();
     }
     this.scheduleStatus();
   }
@@ -233,6 +270,7 @@ export class Library {
       scanning: this.indexer.scanning,
       pendingThumbnails: this.files.countPendingThumbnails(),
       offlineRoots: this.indexer.offlineRootIds.length,
+      duplicateCheck: this.duplicates.progress,
     };
   }
 
@@ -254,18 +292,47 @@ export class Library {
     return new Set(this.indexer.offlineRootIds);
   }
 
-  /** Tagged files get a content fingerprint so they can be recognised after a cross-volume move. */
-  private fingerprintTagged(ids: readonly number[]): void {
-    if (ids.length === 0) {
-      return;
+  private copiesOf(id: number): FileCopy[] {
+    const offline = this.offlineRoots();
+    return this.files.copies(id).map((copy) => ({
+      id: copy.id,
+      name: copy.name,
+      path: copy.path,
+      offline: offline.has(copy.rootId),
+      tags: this.tags.forFile(copy.id),
+    }));
+  }
+
+  /**
+   * Checks that `id` may go to the Trash: it and at least one identical copy are on disk, unchanged
+   * since their content was compared. Then gives its tags to those copies, so none are lost.
+   */
+  private async prepareTrash(id: number): Promise<string> {
+    const group = this.files.contentGroup(id);
+    const file = group.find((candidate) => candidate.id === id);
+    if (!file || !(await this.isUnchangedOnDisk(file))) {
+      throw new Error('This file changed since it was compared. Look for duplicates again.');
     }
-    const targets = this.files.needingFingerprint(ids);
-    void mapLimit(targets, 4, async (target) => {
-      try {
-        this.files.setFingerprint(target.id, await fingerprint(target.path, target.size));
-      } catch {
-        // Unreadable right now; retried the next time the file changes or is tagged.
+    const kept: number[] = [];
+    for (const copy of group) {
+      if (copy.id !== id && (await this.isUnchangedOnDisk(copy))) {
+        kept.push(copy.id);
       }
-    });
+    }
+    if (kept.length === 0) {
+      throw new Error('No identical copy of this file is on disk any more, so it was kept.');
+    }
+    this.tags.copyTags([id], kept);
+    this.broadcast('tagsChanged', null);
+    this.indexer.expectDeletion(id);
+    return file.path;
+  }
+
+  private async isUnchangedOnDisk(file: ContentCandidate): Promise<boolean> {
+    if (!this.indexer.isOnline(file.rootId)) {
+      return false;
+    }
+    const disk = await statFile(file.path);
+    return disk !== null && disk.size === file.size && disk.mtimeMs === file.mtimeMs;
   }
 }

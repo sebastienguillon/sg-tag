@@ -28,6 +28,17 @@ export interface FileDetails extends FileSummary {
   /** The file vanished from disk but is kept because it carries tags. */
   readonly missing: boolean;
   readonly tags: readonly TagRef[];
+  /** Other files with exactly the same content, among those checked for duplicates. */
+  readonly copies: readonly FileCopy[];
+}
+
+/** A file with exactly the same content as another. */
+export interface FileCopy {
+  readonly id: number;
+  readonly name: string;
+  readonly path: string;
+  readonly offline: boolean;
+  readonly tags: readonly TagRef[];
 }
 
 export interface TagRef {
@@ -80,6 +91,14 @@ export interface IndexStatus {
   readonly scanning: string | null;
   readonly pendingThumbnails: number;
   readonly offlineRoots: number;
+  /** Progress of a library-wide duplicate check, while one runs. */
+  readonly duplicateCheck: DuplicateCheck | null;
+}
+
+/** Files read so far by a duplicate check, out of those it knows it has to read. */
+export interface DuplicateCheck {
+  readonly done: number;
+  readonly total: number;
 }
 
 export interface Settings {

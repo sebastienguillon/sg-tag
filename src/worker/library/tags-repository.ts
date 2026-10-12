@@ -37,6 +37,11 @@ function prepareStatements(db: Db) {
     attach: db.prepare<[number, string]>(`
       INSERT OR IGNORE INTO file_tags (file_id, tag_id)
       SELECT f.id, ? FROM files f WHERE f.id IN (SELECT value FROM json_each(?))`),
+    copy: db.prepare<[string, string]>(`
+      INSERT OR IGNORE INTO file_tags (file_id, tag_id)
+      SELECT target.value, ft.tag_id
+      FROM json_each(?) target, file_tags ft
+      WHERE ft.file_id IN (SELECT value FROM json_each(?))`),
     detach: db.prepare<[string, string]>(`
       DELETE FROM file_tags
       WHERE tag_id IN (SELECT value FROM json_each(?)) AND file_id IN (SELECT value FROM json_each(?))`),
@@ -88,6 +93,11 @@ export class TagsRepository {
         }
       }
     })();
+  }
+
+  /** Gives each of `toIds` every tag that one of `fromIds` has. */
+  copyTags(fromIds: readonly number[], toIds: readonly number[]): void {
+    this.statements.copy.run(jsonIds(toIds), jsonIds(fromIds));
   }
 
   removeFromFiles(fileIds: readonly number[], tagIds: readonly number[]): void {

@@ -72,8 +72,28 @@ describe('SearchService', () => {
 
   it('hides missing files unless asked for them', () => {
     library.files.markMissing(ids['beach'] ?? 0, Date.now());
+    // Untagged: only kept a while, in case it moved.
+    library.files.markMissing(ids['scan'] ?? 0, Date.now());
     expect(search('kyoto')).toEqual([ids['sunset']]);
     expect(search('is:missing')).toEqual([ids['beach']]);
+  });
+
+  it('lists files that have an identical copy, copies side by side, largest first', () => {
+    const beachCopy = library.addFile('backup/beach.jpg', { size: 5_000_000 });
+    const clipCopy = library.addFile('backup/clip.mp4', { size: 50_000_000 });
+    const hash = library.db.prepare<[string, number]>(
+      'UPDATE files SET content_hash = ? WHERE id = ?',
+    );
+    hash.run('beach', ids['beach'] ?? 0);
+    hash.run('beach', beachCopy);
+    hash.run('clip', ids['clip'] ?? 0);
+    hash.run('clip', clipCopy);
+    hash.run('scan', ids['scan'] ?? 0);
+
+    expect(search('is:duplicate')).toEqual([clipCopy, ids['clip'], beachCopy, ids['beach']]);
+    expect(search('-is:duplicate')).toEqual([ids['scan'], ids['sunset']]);
+    library.files.markMissing(beachCopy, Date.now());
+    expect(search('is:duplicate')).toEqual([clipCopy, ids['clip']]);
   });
 
   it('filters offline roots on request', () => {

@@ -154,8 +154,12 @@ a {
   -webkit-app-region: no-drag;
 }
 
-.icon-button:hover,
+.icon-button:hover:not(:disabled),
 .icon-button.active {
   background: var(--hover);
   color: var(--text);
+}
+
+.icon-button:disabled {
+  opacity: 0.5;
 }

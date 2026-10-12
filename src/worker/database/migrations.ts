@@ -81,4 +81,15 @@ export const MIGRATIONS: readonly string[] = [
     value  TEXT NOT NULL  -- JSON
   ) STRICT, WITHOUT ROWID;
   `,
+
+  /* sql */ `
+  -- When a row was created: a file that vanishes may be the source of one added shortly before.
+  ALTER TABLE files ADD COLUMN added_at INTEGER;
+  -- SHA-256 of the whole content, computed only when another file has the same size and fingerprint.
+  ALTER TABLE files ADD COLUMN content_hash TEXT;
+
+  CREATE INDEX files_content_hash ON files (content_hash) WHERE content_hash IS NOT NULL;
+  -- Background fingerprinting, newest first.
+  CREATE INDEX files_unprinted ON files (mtime_ms) WHERE fingerprint IS NULL AND missing_since IS NULL;
+  `,
 ];

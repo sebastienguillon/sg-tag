@@ -102,7 +102,21 @@ export function compileQuery(
             );
             break;
           case 'missing':
-            add('f.missing_since IS NOT NULL', [], clause.negated);
+            // Untagged files that vanished are only kept a while, in case they moved.
+            add(
+              'f.missing_since IS NOT NULL AND EXISTS (SELECT 1 FROM file_tags ft WHERE ft.file_id = f.id)',
+              [],
+              clause.negated,
+            );
+            break;
+          case 'duplicate':
+            add(
+              `f.content_hash IS NOT NULL AND EXISTS (
+                SELECT 1 FROM files d
+                WHERE d.content_hash = f.content_hash AND d.id != f.id AND d.missing_since IS NULL)`,
+              [],
+              clause.negated,
+            );
             break;
           case 'offline': {
             const placeholders = context.offlineRootIds.map(() => '?').join(', ');
@@ -126,14 +140,22 @@ export function compileQuery(
     where.unshift('f.missing_since IS NULL');
   }
 
+  // Copies side by side, largest first: the order that matters when deciding what to keep.
+  const groupCopies = clauses.some(
+    (clause) => clause.type === 'state' && clause.state === 'duplicate' && !clause.negated,
+  );
+
   const direction = sort.direction === 'asc' ? 'ASC' : 'DESC';
   // Terms under 3 characters are LIKE scans over names and folders, which are not in the sort
   // indexes. Walking an index in display order would then cost one random row read per file; a
   // sequential scan plus sort is several times faster. Unary `+` keeps SQLite off the index.
   const scan = clauses.some((clause) => clause.type === 'text' && codePoints(clause.value) < 3);
-  const orderBy = ORDER[sort.field]
-    .map((column, index) => `${scan && index === 0 ? '+' : ''}${column} ${direction}`)
-    .join(', ');
+  const orderBy = [
+    ...(groupCopies ? ['f.size DESC', 'f.content_hash'] : []),
+    ...ORDER[sort.field].map(
+      (column, index) => `${scan && index === 0 ? '+' : ''}${column} ${direction}`,
+    ),
+  ].join(', ');
   return {
     sql: `SELECT f.id FROM files f${where.length > 0 ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY ${orderBy}`,
     params,

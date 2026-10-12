@@ -34,6 +34,19 @@
     <button
       type="button"
       class="icon-button"
+      aria-label="Find duplicates"
+      title="Find duplicates: files with exactly the same content"
+      [disabled]="findingDuplicates()"
+      (click)="findDuplicates()"
+    >
+      <app-icon
+        [class.spin]="findingDuplicates()"
+        [name]="findingDuplicates() ? 'loader' : 'copy'"
+      />
+    </button>
+    <button
+      type="button"
+      class="icon-button"
       aria-label="Toggle details panel"
       title="Details panel"
       [class.active]="sidebarOpen()"
@@ -85,9 +98,23 @@
       }
       @case ('no-match') {
         <div class="empty">
-          <app-icon class="empty-icon" name="search" />
-          <h2>No files match “{{ query() }}”</h2>
-          <p>Press <kbd>?</kbd> in the search field for the syntax.</p>
+          @if (query().trim() === duplicatesQuery) {
+            <app-icon class="empty-icon" name="copy" />
+            <h2>No identical files found so far</h2>
+            <p>Files with exactly the same content as another one are listed here, side by side.</p>
+            <button
+              type="button"
+              class="button primary"
+              [disabled]="findingDuplicates()"
+              (click)="findDuplicates()"
+            >
+              <app-icon name="copy" /> Find duplicates
+            </button>
+          } @else {
+            <app-icon class="empty-icon" name="search" />
+            <h2>No files match “{{ query() }}”</h2>
+            <p>Press <kbd>?</kbd> in the search field for the syntax.</p>
+          }
         </div>
       }
     }

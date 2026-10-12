@@ -20,6 +20,10 @@ export interface LibraryApi {
   readonly listTags: () => readonly Tag[];
   readonly addTags: (fileIds: readonly number[], tagPaths: readonly string[]) => void;
   readonly removeTags: (fileIds: readonly number[], tagIds: readonly number[]) => void;
+  /** Checks the whole library for identical files; resolves to how many files have a copy. */
+  readonly findDuplicates: () => number;
+  /** Gives a file and each of its identical copies the tags of all of them. */
+  readonly shareTagsWithCopies: (fileId: number) => void;
   readonly listRoots: () => readonly LibraryRoot[];
   readonly addRoot: (path: string) => LibraryRoot;
   readonly removeRoot: (id: number) => void;
@@ -54,6 +58,13 @@ export interface WorkerHostApi {
   readonly resolvePath: (id: number) => string | null;
   /** Path of an indexed video that is on disk, for streaming to the renderer; `null` otherwise. */
   readonly videoPath: (id: number) => string | null;
+  /**
+   * Before a file is moved to the Trash: checks that an identical copy of it stays on disk, adds
+   * the file's tags to its copies, and returns its path. Throws when the file must not be trashed.
+   */
+  readonly prepareTrash: (id: number) => string;
+  /** After moving a file to the Trash (or failing to): drops it from the index if it is gone. */
+  readonly forgetFile: (id: number) => void;
   readonly shutdown: () => void;
 }
 

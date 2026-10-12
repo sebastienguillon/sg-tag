@@ -16,6 +16,14 @@
       <app-icon class="spin" name="loader" /> Indexing {{ current.scanning }}
     </span>
   }
+  @if (current.duplicateCheck; as check) {
+    <span class="activity">
+      <app-icon class="spin" name="loader" /> Looking for duplicates
+      @if (check.total > 0) {
+        · {{ check.done | number }} of {{ check.total | number }} files read
+      }
+    </span>
+  }
   @if (current.pendingThumbnails > 0) {
     <span class="faint">{{ current.pendingThumbnails | number }} thumbnails to render</span>
   }

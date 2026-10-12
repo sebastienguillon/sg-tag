@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { open } from 'node:fs/promises';
 
 const CHUNK = 64 * 1024;
@@ -23,4 +24,13 @@ export async function fingerprint(filePath: string, size: number): Promise<strin
   } finally {
     await handle.close();
   }
+}
+
+/** SHA-256 of the whole content: proof that two files with the same fingerprint are identical. */
+export async function contentHash(filePath: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(filePath, { highWaterMark: 1024 * 1024 })) {
+    hash.update(chunk as Buffer);
+  }
+  return hash.digest('hex');
 }

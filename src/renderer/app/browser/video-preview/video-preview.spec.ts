@@ -22,6 +22,7 @@ const clip: FileDetails = {
   codec: 'h264',
   missing: false,
   tags: [],
+  copies: [],
 };
 
 describe('isPlayable', () => {

@@ -21,6 +21,14 @@ describe('parseQuery', () => {
     ]);
   });
 
+  it('parses states, including duplicates', () => {
+    expect(parseQuery('is:duplicate -is:duplicates is:missing')).toEqual([
+      { type: 'state', state: 'duplicate', negated: false },
+      { type: 'state', state: 'duplicate', negated: true },
+      { type: 'state', state: 'missing', negated: false },
+    ]);
+  });
+
   it('ignores incomplete terms typed so far', () => {
     expect(parseQuery('tag: size:> is:')).toEqual([]);
     expect(parseQuery('-')).toEqual([{ type: 'text', value: '-', negated: false }]);

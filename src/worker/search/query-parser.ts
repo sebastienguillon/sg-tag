@@ -1,6 +1,6 @@
 import type { FileKind } from '@shared/model';
 
-export type FileState = 'tagged' | 'untagged' | 'missing' | 'offline';
+export type FileState = 'tagged' | 'untagged' | 'missing' | 'offline' | 'duplicate';
 
 /** One search term. Terms are AND-ed; comma-separated values inside a term are OR-ed. */
 export type Clause =
@@ -150,6 +150,9 @@ function keyword(value: string, negated: boolean): Clause | null {
     case 'missing':
     case 'offline':
       return { type: 'state', state: value, negated };
+    case 'duplicate':
+    case 'duplicates':
+      return { type: 'state', state: 'duplicate', negated };
     default:
       return null;
   }

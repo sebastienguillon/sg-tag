@@ -18,6 +18,7 @@ const bridge: DesktopBridge = {
   pickFolder: () => ipcRenderer.invoke(IpcChannel.pickFolder) as Promise<string | null>,
   openFile: (id) => ipcRenderer.invoke(IpcChannel.openFile, id) as Promise<void>,
   revealFile: (id) => ipcRenderer.invoke(IpcChannel.revealFile, id) as Promise<void>,
+  trashFile: (id) => ipcRenderer.invoke(IpcChannel.trashFile, id) as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld('sgTag', bridge);

@@ -11,6 +11,8 @@ const log = createLogger('indexer');
 
 /** How often unreachable roots (unplugged drives, unmounted shares) are checked again. */
 const OFFLINE_POLL_MS = 15_000;
+/** How often untagged files that vanished, and were not found elsewhere, are forgotten. */
+const SWEEP_INTERVAL_MS = 60_000;
 
 /** Native-level filters; everything is filtered again in JS, these only cut event volume. */
 const WATCH_IGNORE = ['**/.*', '**/.*/**', '**/node_modules', '**/node_modules/**'];
@@ -38,6 +40,7 @@ export class Indexer {
   private queue: Promise<void> = Promise.resolve();
   private scanningRoot: string | null = null;
   private pollTimer: NodeJS.Timeout | undefined;
+  private sweepTimer: NodeJS.Timeout | undefined;
   private stopped = false;
 
   constructor(
@@ -73,11 +76,15 @@ export class Indexer {
         log.error('Offline poll failed:', error);
       });
     }, OFFLINE_POLL_MS);
+    this.sweepTimer = setInterval(() => {
+      this.schedule(() => this.sweep());
+    }, SWEEP_INTERVAL_MS);
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     clearInterval(this.pollTimer);
+    clearInterval(this.sweepTimer);
     await Promise.all([...this.subscriptions.keys()].map((id) => this.unwatch(id)));
     await this.queue;
   }
@@ -110,6 +117,16 @@ export class Indexer {
       this.roots.delete(id);
       return Promise.resolve(ids);
     });
+  }
+
+  /** The app is about to move `id` to the Trash: it must not be taken for a moved file. */
+  expectDeletion(id: number): void {
+    this.reconciler.expectDeletion(id);
+  }
+
+  /** After the app tried to move `id` to the Trash: drops it, unless it is still on disk. */
+  async forget(id: number): Promise<void> {
+    this.emit(await this.enqueue(() => this.reconciler.forget(id)));
   }
 
   private async activate(root: RootRecord): Promise<void> {
@@ -197,6 +214,13 @@ export class Indexer {
       this.scanningRoot = null;
       this.listener.onStateChange();
     }
+  }
+
+  private sweep(): Promise<void> {
+    if (!this.stopped) {
+      this.emit(this.reconciler.sweep());
+    }
+    return Promise.resolve();
   }
 
   private async recheck(root: RootRecord): Promise<void> {

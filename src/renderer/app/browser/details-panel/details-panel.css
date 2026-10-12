@@ -162,3 +162,66 @@ dd {
   font-size: 11px;
   user-select: text;
 }
+
+.copy-list {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.copy-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.copy-name {
+  overflow-wrap: anywhere;
+}
+
+.copy-path {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.copy-tags {
+  color: var(--text-muted);
+}
+
+.copy .icon-button {
+  flex: none;
+  font-size: 14px;
+}
+
+.confirm {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  font-size: 12px;
+}
+
+.confirm p {
+  margin: 0;
+}
+
+.error {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}

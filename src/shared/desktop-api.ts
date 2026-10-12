@@ -6,6 +6,8 @@ export interface DesktopBridge {
   readonly pickFolder: () => Promise<string | null>;
   readonly openFile: (id: number) => Promise<void>;
   readonly revealFile: (id: number) => Promise<void>;
+  /** Moves a file that has an identical copy to the Trash, after giving its tags to the copy. */
+  readonly trashFile: (id: number) => Promise<void>;
 }
 
 export const IpcChannel = {
@@ -14,6 +16,7 @@ export const IpcChannel = {
   pickFolder: 'dialog:pick-folder',
   openFile: 'shell:open-file',
   revealFile: 'shell:reveal-file',
+  trashFile: 'shell:trash-file',
 } as const;
 
 /** `window.postMessage` payload used by the preload script to hand the worker port to the page. */

@@ -34,6 +34,17 @@ describe('TagsRepository', () => {
     ]);
   });
 
+  it('copies tags from some files onto others', () => {
+    const { tags, addFile } = createTestLibrary();
+    const a = addFile('a.jpg');
+    const b = addFile('b.jpg');
+    tags.addToFiles([a], ['shared', 'from-a']);
+    tags.addToFiles([b], ['shared', 'from-b']);
+    tags.copyTags([a, b], [a, b]);
+    expect(tags.forFile(a).map((tag) => tag.path)).toEqual(['from-a', 'from-b', 'shared']);
+    expect(tags.forFile(b).map((tag) => tag.path)).toEqual(['from-a', 'from-b', 'shared']);
+  });
+
   it('prunes tags that end up unused, bottom-up', () => {
     const { tags, addFile } = createTestLibrary();
     const a = addFile('a.jpg');

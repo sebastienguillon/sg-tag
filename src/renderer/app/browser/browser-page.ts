@@ -26,6 +26,8 @@ const log = createLogger('browser');
 
 type EmptyState = 'loading' | 'no-folders' | 'indexing' | 'no-files' | 'no-match';
 
+const DUPLICATES_QUERY = 'is:duplicate';
+
 /** The main view: search, thumbnail grid, details sidebar. */
 @Component({
   selector: 'app-browser-page',
@@ -56,6 +58,12 @@ export class BrowserPage {
   protected readonly defaultSidebarWidth = DEFAULT_SETTINGS.sidebarWidth;
   protected readonly sidebarWidth = this.preferences.sidebarWidth;
   protected readonly addError = signal<string | null>(null);
+  protected readonly duplicatesQuery = DUPLICATES_QUERY;
+  private readonly checkingDuplicates = signal(false);
+  /** A duplicate check runs, started here or from another window. */
+  protected readonly findingDuplicates = computed(
+    () => this.checkingDuplicates() || (this.store.status()?.duplicateCheck ?? null) !== null,
+  );
 
   private readonly roots = resource({
     params: () => ({ connection: this.worker.generation(), revision: this.rootsRevision() }),
@@ -111,6 +119,19 @@ export class BrowserPage {
     this.sidebarOpen.set(true);
     // The panel may only now be created.
     queueMicrotask(() => this.details()?.focusTagInput());
+  }
+
+  /** Checks the whole library, then lists the files that have an identical copy. */
+  protected async findDuplicates(): Promise<void> {
+    this.checkingDuplicates.set(true);
+    try {
+      await this.worker.call('findDuplicates');
+      this.query.set(DUPLICATES_QUERY);
+    } catch (error) {
+      log.error('Cannot look for duplicates:', error);
+    } finally {
+      this.checkingDuplicates.set(false);
+    }
   }
 
   protected async addFolder(): Promise<void> {

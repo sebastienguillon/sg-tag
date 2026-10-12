@@ -9,7 +9,10 @@ Tag and retrieve the images and videos on your computer, fast. macOS, Windows an
 - Search filters on every keystroke: names, folders, tags, and operators (`tag:`, `type:`, `ext:`,
   `size:`, `in:`, `is:`). Press `?` in the search field for the syntax.
 - Hierarchical tags (`trips/2024/japan`). Searching `tag:trips` includes everything below it.
+- Finds identical files (Find duplicates in the toolbar, `is:duplicate`): give the copies the same
+  tags, or move the ones you do not need to the Trash.
 - **Files are never modified.** Tags live in the app's own database (see [Tags and files](#tags-and-files)).
+  The only change made on disk is moving a duplicate to the Trash when you ask.
 
 ## Requirements
 
@@ -70,9 +73,15 @@ byte-identical, which also means:
 
 - **Back up the data folder**: it is the only copy of your tags.
 - Tags are not visible to other apps or machines.
-- Files renamed or moved outside the app keep their tags: they are recognised by device + inode
-  (same volume) or by a content fingerprint (another volume). A tagged file that disappears is kept
-  as missing (`is:missing`) until it is found again.
+- Files renamed or moved outside the app, within or between library folders, stay the same file
+  (tags, thumbnail): they are recognised by device + inode (same volume) or by a content fingerprint
+  (another volume), whether the new path or the deletion is noticed first. A tagged file that
+  disappears is kept as missing (`is:missing`) until it is found again; an untagged one is forgotten
+  after 30 minutes.
+- Identical copies are found in steps: same size (no reading), same fingerprint (first and last
+  64 KiB), then the same SHA-256 of the whole file. Only the last step reads whole files, and only
+  for likely copies; what was read is kept until a file changes. Before a copy goes to the Trash,
+  the app checks that another copy is still on disk, unchanged, and gives it the copy's tags.
 - Folders on drives that are not connected are marked offline; their files and tags are kept, and
   their cached thumbnails stay browsable.
 

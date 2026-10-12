@@ -27,6 +27,10 @@ const REVEAL_LABELS: Readonly<Record<string, string>> = {
   win32: 'Show in Explorer',
 };
 
+const TRASH_NAMES: Readonly<Record<string, string>> = {
+  win32: 'Recycle Bin',
+};
+
 /** Sidebar: metadata of the selected file, and tag editing for one or many files. */
 @Component({
   selector: 'app-details-panel',
@@ -44,6 +48,7 @@ export class DetailsPanel {
   private readonly revision = signal(0);
 
   protected readonly revealLabel = REVEAL_LABELS[this.platform] ?? 'Show in Folder';
+  protected readonly trashName = TRASH_NAMES[this.platform] ?? 'Trash';
   protected readonly selectedIds = computed(() => [...this.store.selection()]);
   protected readonly count = computed(() => this.selectedIds().length);
   private readonly singleId = computed(() =>
@@ -97,6 +102,35 @@ export class DetailsPanel {
           .map((tag) => tag.path),
       ),
   );
+  /** The file or copy waiting for confirmation before going to the Trash. */
+  protected readonly confirmingTrash = linkedSignal<number | undefined, number | null>({
+    source: this.singleId,
+    computation: () => null,
+  });
+  protected readonly trashTarget = computed(() => {
+    const id = this.confirmingTrash();
+    const file = this.file();
+    if (id === null || !file) {
+      return null;
+    }
+    return id === file.id ? file : (file.copies.find((copy) => copy.id === id) ?? null);
+  });
+  protected readonly trashing = signal(false);
+  protected readonly trashError = linkedSignal<number | undefined, string | null>({
+    source: this.singleId,
+    computation: () => null,
+  });
+  /** The file and its copies do not all carry the same tags. */
+  protected readonly copiesDiffer = computed(() => {
+    const file = this.file();
+    const key = (tags: readonly TagRef[]): string =>
+      tags
+        .map((tag) => tag.id)
+        .sort((a, b) => a - b)
+        .join(',');
+    return file ? file.copies.some((copy) => key(copy.tags) !== key(file.tags)) : false;
+  });
+
   protected readonly thumbnailUrl = computed(() => {
     const file = this.file();
     return file ? `thumb://file/${file.id}?v=${file.mtimeMs}` : null;
@@ -145,6 +179,33 @@ export class DetailsPanel {
   /** Clicking a tag searches for it. */
   protected searchTag(tag: TagRef): void {
     this.store.query.set(/[\s",]/.test(tag.path) ? `tag:"${tag.path}"` : `tag:${tag.path}`);
+  }
+
+  protected shareTags(id: number): void {
+    this.worker.call('shareTagsWithCopies', id).catch((error: unknown) => {
+      log.error('Cannot share tags with copies:', error);
+    });
+  }
+
+  protected confirmTrash(id: number): void {
+    this.trashError.set(null);
+    this.confirmingTrash.set(id);
+  }
+
+  protected async trash(id: number): Promise<void> {
+    this.trashing.set(true);
+    try {
+      await this.store.trash(id);
+      this.confirmingTrash.set(null);
+    } catch (error) {
+      this.trashError.set(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.trashing.set(false);
+    }
+  }
+
+  protected tagList(tags: readonly TagRef[]): string {
+    return tags.map((tag) => tag.path).join(', ');
   }
 
   protected open(id: number): void {

@@ -68,6 +68,7 @@ export const fakeDesktop: DesktopBridge = {
   pickFolder: () => Promise.resolve(null),
   openFile: () => Promise.resolve(),
   revealFile: () => Promise.resolve(),
+  trashFile: () => Promise.resolve(),
 };
 
 /** Lets pending promise callbacks run. */

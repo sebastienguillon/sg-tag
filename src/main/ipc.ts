@@ -3,15 +3,18 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import type { WorkerHost } from './worker-host';
 
-/** Main-process services for the renderer: folder picker, open/reveal files, worker port. */
+/** Main-process services for the renderer: folder picker, open/reveal/trash files, worker port. */
 export function registerIpc(worker: WorkerHost, trustedOrigin: string): void {
   const trusted = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => {
     const url = event.senderFrame?.url;
     return url !== undefined && new URL(url).origin === trustedOrigin;
   };
 
+  const isFileId = (id: unknown): id is number =>
+    typeof id === 'number' && Number.isSafeInteger(id);
+
   const resolvePath = async (event: IpcMainInvokeEvent, id: unknown): Promise<string | null> => {
-    if (!trusted(event) || typeof id !== 'number' || !Number.isSafeInteger(id)) {
+    if (!trusted(event) || !isFileId(id)) {
       return null;
     }
     return worker.call('resolvePath', id);
@@ -53,6 +56,20 @@ export function registerIpc(worker: WorkerHost, trustedOrigin: string): void {
     const filePath = await resolvePath(event, id);
     if (filePath !== null) {
       shell.showItemInFolder(filePath);
+    }
+  });
+
+  // Only a file the indexer vouches for: an identical copy stays on disk and has its tags.
+  ipcMain.handle(IpcChannel.trashFile, async (event, id: unknown) => {
+    if (!trusted(event) || !isFileId(id)) {
+      return;
+    }
+    const filePath = await worker.call('prepareTrash', id);
+    try {
+      await shell.trashItem(filePath);
+    } finally {
+      // Also when trashing failed: the indexer stops expecting the file to vanish.
+      await worker.call('forgetFile', id);
     }
   });
 }
