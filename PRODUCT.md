@@ -19,7 +19,7 @@ library folders the user picks, keeps that index live, and lets them find any fi
 name, folder, tag or property, then tag one file or many at once.
 
 Success: finding a file or a set of files takes seconds, tagging is quick enough to do as a habit,
-and nothing about the files on disk changes.
+and nothing about the files on disk changes unless the user asks to trash a duplicate.
 
 ## Positioning
 
@@ -91,8 +91,10 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 
 ## Product Principles
 
-1. **The user's files are theirs.** SG Tag reads files; it never writes, moves or renames them. When
-   an action loses tags (removing a library folder), say so plainly before it happens.
+1. **The user's files are theirs.** SG Tag reads files; it never writes or renames them, and the
+   only file it moves is a duplicate the user sends to the Trash, once an identical copy is safe on
+   disk with its tags. When an action loses tags (removing a library folder), say so plainly before
+   it happens.
 2. **Instant is the feature.** A change that makes search, scrolling or tagging feel slower is a
    regression, whatever it adds.
 3. **The file system stays in charge.** Follow what happens on disk (renames, moves, missing files,

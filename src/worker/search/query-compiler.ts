@@ -1,4 +1,5 @@
 import type { SortOrder } from '@shared/model';
+import { HAS_COPY } from '../library/files-repository';
 import { extensionAliases } from '../library/formats';
 import type { Clause } from './query-parser';
 
@@ -110,13 +111,7 @@ export function compileQuery(
             );
             break;
           case 'duplicate':
-            add(
-              `f.content_hash IS NOT NULL AND EXISTS (
-                SELECT 1 FROM files d
-                WHERE d.content_hash = f.content_hash AND d.id != f.id AND d.missing_since IS NULL)`,
-              [],
-              clause.negated,
-            );
+            add(HAS_COPY, [], clause.negated);
             break;
           case 'offline': {
             const placeholders = context.offlineRootIds.map(() => '?').join(', ');

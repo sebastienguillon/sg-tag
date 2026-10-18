@@ -32,6 +32,8 @@ export interface ThumbnailerOptions {
   readonly offlineRootIds: () => readonly number[];
   /** A thumbnail, and the media metadata read along the way, was stored for this file. */
   readonly onRendered: (id: number) => void;
+  /** This file no longer waits for a thumbnail: rendered, left to the OS thumbnailer, or failed. */
+  readonly onSettled: (id: number) => void;
 }
 
 /**
@@ -187,6 +189,7 @@ export class Thumbnailer {
     } catch (error) {
       log.warn(`Cannot render ${info.path}: ${errorMessage(error)}`);
       this.options.files.setThumb(info.id, ThumbState.failed);
+      this.options.onSettled(info.id);
       resolve(NONE);
     }
   }
@@ -205,6 +208,7 @@ export class Thumbnailer {
     for (const decoder of formatOf(info.ext)?.decoders ?? []) {
       if (decoder === 'system') {
         this.options.files.setThumb(info.id, ThumbState.system);
+        this.options.onSettled(info.id);
         return { kind: 'system', sourcePath: info.path };
       }
       const media = await this.decode(decoder, info, target).catch((error: unknown) => {
@@ -214,10 +218,12 @@ export class Thumbnailer {
       if (media) {
         this.options.files.setThumb(info.id, ThumbState.ready, media);
         this.options.onRendered(info.id);
+        this.options.onSettled(info.id);
         return { kind: 'file', path: target };
       }
     }
     this.options.files.setThumb(info.id, ThumbState.failed);
+    this.options.onSettled(info.id);
     return NONE;
   }
 

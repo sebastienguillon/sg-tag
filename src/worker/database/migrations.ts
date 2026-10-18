@@ -89,7 +89,8 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE files ADD COLUMN content_hash TEXT;
 
   CREATE INDEX files_content_hash ON files (content_hash) WHERE content_hash IS NOT NULL;
-  -- Background fingerprinting, newest first.
-  CREATE INDEX files_unprinted ON files (mtime_ms) WHERE fingerprint IS NULL AND missing_since IS NULL;
+  -- Background fingerprinting, newest first, once the thumbnail is done.
+  CREATE INDEX files_unprinted ON files (mtime_ms)
+    WHERE fingerprint IS NULL AND missing_since IS NULL AND thumb_state != 0;
   `,
 ];

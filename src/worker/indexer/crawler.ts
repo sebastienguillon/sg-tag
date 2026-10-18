@@ -25,6 +25,14 @@ export function crawl(dir: string): Promise<string[]> {
     .withPromise();
 }
 
+/**
+ * The inode part of a file id. The device part is not stable: a drive or share can get another
+ * device number each time it is mounted, its files staying the same.
+ */
+export function inodeOf(fileId: string): string {
+  return fileId.slice(fileId.indexOf(':') + 1);
+}
+
 export async function statFile(filePath: string): Promise<DiskFile | null> {
   try {
     // BigInt stats: Windows file ids do not fit in a double.

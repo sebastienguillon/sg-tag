@@ -44,9 +44,11 @@ export interface IndexedFile {
 
 export interface MissingCandidate {
   readonly id: number;
+  readonly path: string;
   readonly fileId: string | null;
   readonly mtimeMs: number;
   readonly fingerprint: string | null;
+  readonly missingSince: number;
 }
 
 /** A file to read, and the stats it had then: what is read is stored only if they still hold. */
@@ -60,6 +62,7 @@ export interface FingerprintTarget {
 /** A present file that may have an identical copy. */
 export interface ContentCandidate extends FingerprintTarget {
   readonly rootId: number;
+  readonly fileId: string | null;
   readonly fingerprint: string | null;
   readonly contentHash: string | null;
 }
@@ -112,6 +115,8 @@ interface RecordRow {
   mtime_ms: number;
   birthtime_ms: number | null;
   file_id: string | null;
+  fingerprint: string | null;
+  content_hash: string | null;
 }
 
 interface SummaryRow {
@@ -142,14 +147,34 @@ const INDEXED_COLUMNS = `
   f.missing_since IS NOT NULL AS missing`;
 
 const CANDIDATE_COLUMNS = `
-  f.id, f.root_id AS rootId, f.path, f.size, f.mtime_ms AS mtimeMs, f.fingerprint,
-  f.content_hash AS contentHash`;
+  f.id, f.root_id AS rootId, f.path, f.size, f.mtime_ms AS mtimeMs, f.file_id AS fileId,
+  f.fingerprint, f.content_hash AS contentHash`;
+
+/**
+ * Rows `a` and `b` are not one file on disk seen twice: a hard link, or a symbolic link indexed as a
+ * file, has the same device+inode. That is not a copy: it frees nothing, and trashing its target
+ * would lose the content.
+ */
+export function notSameFile(a: string, b: string): string {
+  return `(${a}.file_id IS NULL OR ${b}.file_id IS NULL OR ${a}.file_id != ${b}.file_id)`;
+}
+
+/**
+ * The inode part of a `file_id` (SQL): the device part may change when a drive is mounted again.
+ */
+function inodeOf(fileId: string): string {
+  return `substr(${fileId}, instr(${fileId}, ':') + 1)`;
+}
+
+/** In an UPDATE of `files`, the row's file is not the one described by `@fileId`. */
+const OTHER_INODE = `${inodeOf('file_id')} IS NOT ${inodeOf('@fileId')}`;
 
 /** A present file that has another present file with the same content. */
-const HAS_COPY = `
+export const HAS_COPY = `
   f.content_hash IS NOT NULL AND EXISTS (
     SELECT 1 FROM files d
-    WHERE d.content_hash = f.content_hash AND d.id != f.id AND d.missing_since IS NULL)`;
+    WHERE d.content_hash = f.content_hash AND d.id != f.id AND d.missing_since IS NULL
+      AND ${notSameFile('d', 'f')})`;
 
 const SUMMARY_COLUMNS = `
   f.id, f.root_id, f.name, f.kind, f.ext, f.size, f.mtime_ms, f.width, f.height, f.duration_ms`;
@@ -170,37 +195,55 @@ function prepareStatements(db: Db) {
         (root_id, path, dir, name, ext, kind, size, mtime_ms, birthtime_ms, file_id, added_at)
       VALUES
         (@rootId, @path, @dir, @name, @ext, @kind, @size, @mtimeMs, @birthtimeMs, @fileId, @addedAt)`),
-    update: db.prepare<[FileRecordParams & { id: number; changed: number }]>(`
+    // Right-hand sides read the row as it was: another inode means another file is now at this
+    // path, even with the same size and modification time, so what was read from the previous one
+    // no longer applies.
+    update: db.prepare<
+      [FileRecordParams & { id: number; changed: number; addedAt: number | null }]
+    >(`
       UPDATE files SET
         root_id = @rootId, dir = @dir, name = @name, ext = @ext, kind = @kind,
         size = @size, mtime_ms = @mtimeMs, birthtime_ms = @birthtimeMs, file_id = @fileId,
-        missing_since = NULL,
-        fingerprint = CASE WHEN @changed THEN NULL ELSE fingerprint END,
-        content_hash = CASE WHEN @changed THEN NULL ELSE content_hash END,
+        missing_since = NULL, added_at = COALESCE(@addedAt, added_at),
+        fingerprint = CASE WHEN @changed OR ${OTHER_INODE} THEN NULL ELSE fingerprint END,
+        content_hash = CASE WHEN @changed OR ${OTHER_INODE} THEN NULL ELSE content_hash END,
         thumb_state = CASE WHEN @changed THEN 0 ELSE thumb_state END,
         width = CASE WHEN @changed THEN NULL ELSE width END,
         height = CASE WHEN @changed THEN NULL ELSE height END,
         duration_ms = CASE WHEN @changed THEN NULL ELSE duration_ms END,
         codec = CASE WHEN @changed THEN NULL ELSE codec END
       WHERE id = @id AND path = @path`),
-    relocate: db.prepare<[FileRecordParams & { id: number }]>(`
+    // A match by fingerprint only (size, first and last 64 KiB) says nothing of the rest of the
+    // content: a hash read from the file now at that path comes first, and the row's own is only
+    // kept when the file is certainly the same one (same device+inode, size and modification
+    // time). Right-hand sides read the row as it was.
+    relocate: db.prepare<[RelocateParams]>(`
       UPDATE files SET
         root_id = @rootId, path = @path, dir = @dir, name = @name, ext = @ext, kind = @kind,
         size = @size, mtime_ms = @mtimeMs, birthtime_ms = @birthtimeMs, file_id = @fileId,
-        missing_since = NULL
+        missing_since = NULL, added_at = COALESCE(@addedAt, added_at),
+        fingerprint = COALESCE(fingerprint, @fingerprint),
+        content_hash = COALESCE(
+          @contentHash,
+          CASE WHEN file_id IS @fileId AND size = @size AND mtime_ms = @mtimeMs
+            THEN content_hash END)
       WHERE id = @id`),
     record: db.prepare<[number], RecordRow>(`
-      SELECT root_id, path, dir, name, ext, kind, size, mtime_ms, birthtime_ms, file_id
+      SELECT root_id, path, dir, name, ext, kind, size, mtime_ms, birthtime_ms, file_id,
+             fingerprint, content_hash
       FROM files WHERE id = ?`),
     copyTags: db.prepare<[number, number]>(
       'INSERT OR IGNORE INTO file_tags (file_id, tag_id) SELECT ?, tag_id FROM file_tags WHERE file_id = ?',
     ),
+    park: db.prepare<[number]>(`UPDATE files SET path = char(0) || id WHERE id = ?`),
     markMissing: db.prepare<[number, number]>(
       'UPDATE files SET missing_since = ? WHERE id = ? AND missing_since IS NULL',
     ),
     delete: db.prepare<[string]>('DELETE FROM files WHERE id IN (SELECT value FROM json_each(?))'),
     missingBySize: db.prepare<[number], MissingCandidate>(`
-      SELECT id, file_id AS fileId, mtime_ms AS mtimeMs, fingerprint FROM files
+      SELECT id, path, file_id AS fileId, mtime_ms AS mtimeMs, fingerprint,
+             missing_since AS missingSince
+      FROM files
       WHERE size = ? AND missing_since IS NOT NULL`),
     recentBySize: db.prepare<[number, number], IndexedRow>(`
       SELECT ${INDEXED_COLUMNS} FROM files f
@@ -245,10 +288,10 @@ function prepareStatements(db: Db) {
       SELECT ${CANDIDATE_COLUMNS} FROM files f
       WHERE f.missing_since IS NULL
         AND f.content_hash = (SELECT content_hash FROM files WHERE id = ?)`),
-    copies: db.prepare<[number, number], CopyRecord>(`
-      SELECT f.id, f.root_id AS rootId, f.name, f.path FROM files f
-      WHERE f.missing_since IS NULL AND f.id != ?
-        AND f.content_hash = (SELECT content_hash FROM files WHERE id = ?)
+    copies: db.prepare<[number], CopyRecord>(`
+      SELECT f.id, f.root_id AS rootId, f.name, f.path FROM files f JOIN files s ON s.id = ?
+      WHERE f.missing_since IS NULL AND f.id != s.id AND f.content_hash = s.content_hash
+        AND ${notSameFile('f', 's')}
       ORDER BY f.path`),
     countWithCopy: db.prepare<[], { count: number }>(
       `SELECT COUNT(*) AS count FROM files f WHERE f.missing_since IS NULL AND ${HAS_COPY}`,
@@ -323,47 +366,59 @@ export class FilesRepository {
     return Number(this.statements.insert.run({ ...toParams(record), addedAt }).lastInsertRowid);
   }
 
-  /** Refreshes stats of a file found at its known path; `changed` drops derived data. */
-  update(id: number, record: FileRecord, changed: boolean): void {
-    this.statements.update.run({ ...toParams(record), id, changed: changed ? 1 : 0 });
+  /**
+   * Refreshes stats of a file found at its known path; `changed` drops derived data. `addedAt`, when
+   * given, makes the row count as added then (see `recentCandidates`).
+   */
+  update(id: number, record: FileRecord, changed: boolean, addedAt: number | null = null): void {
+    this.statements.update.run({ ...toParams(record), id, changed: changed ? 1 : 0, addedAt });
   }
 
-  /** Re-points a missing file to where it was found again, keeping its id, tags and thumbnail. */
-  relocate(id: number, record: FileRecord): void {
-    this.statements.relocate.run({ ...toParams(record), id });
+  /**
+   * Re-points a missing file to where it was found again, keeping its id, tags and thumbnail.
+   * `addedAt`, when given, makes the row count as added then (see `recentCandidates`).
+   */
+  relocate(id: number, record: FileRecord, addedAt: number | null = null): void {
+    this.statements.relocate.run({
+      ...toParams(record),
+      id,
+      addedAt,
+      fingerprint: null,
+      contentHash: null,
+    });
   }
 
   /**
    * The missing file `keepId` turned out to be the one indexed as `dropId`: the first keeps its id,
    * tags and thumbnail, takes the location of the second (or `record`), and gains its tags. The
-   * second row is deleted. Call within a transaction.
+   * second row is deleted. `addedAt` is as for `relocate`. Call within a transaction.
    */
-  merge(keepId: number, dropId: number, record?: FileRecord): void {
-    const target = record ?? this.recordOf(dropId);
+  merge(keepId: number, dropId: number, record?: FileRecord, addedAt: number | null = null): void {
+    const row = this.statements.record.get(dropId);
+    const target = record ?? (row && toRecord(row));
     if (!target) {
       return;
     }
     this.statements.copyTags.run(keepId, dropId);
     this.statements.delete.run(jsonIds([dropId]));
-    this.statements.relocate.run({ ...toParams(target), id: keepId });
+    // Without `record`, the dropped row describes the file now at that location: what was read
+    // from it still applies.
+    const reads = !record && row ? row : null;
+    this.statements.relocate.run({
+      ...toParams(target),
+      id: keepId,
+      addedAt,
+      fingerprint: reads?.fingerprint ?? null,
+      contentHash: reads?.content_hash ?? null,
+    });
   }
 
-  private recordOf(id: number): FileRecord | null {
-    const row = this.statements.record.get(id);
-    return row
-      ? {
-          rootId: row.root_id,
-          path: row.path,
-          dir: row.dir,
-          name: row.name,
-          ext: row.ext,
-          kind: row.kind,
-          size: row.size,
-          mtimeMs: row.mtime_ms,
-          birthtimeMs: row.birthtime_ms,
-          fileId: row.file_id,
-        }
-      : null;
+  /**
+   * Frees the path of `id`, about to be relocated in the same transaction: the file at its path is
+   * another one, possibly the one to be relocated there.
+   */
+  park(id: number): void {
+    this.statements.park.run(id);
   }
 
   markMissing(id: number, now: number): void {
@@ -376,7 +431,10 @@ export class FilesRepository {
     }
   }
 
-  /** Present files of `size` added at `since` or later. */
+  /**
+   * Present files of `size` added at `since` or later: new files, and files found where they might
+   * have arrived from elsewhere (matched by fingerprint only, or at the path of a missing file).
+   */
   recentCandidates(size: number, since: number): IndexedFile[] {
     return this.statements.recentBySize.all(size, since).map(toIndexed);
   }
@@ -433,9 +491,12 @@ export class FilesRepository {
     return this.statements.contentGroup.all(id);
   }
 
-  /** Other present files with exactly the content of `id`, as far as hashes were computed. */
+  /**
+   * Other present files with exactly the content of `id`, as far as hashes were computed; the same
+   * file seen through another path (hard or symbolic link) is not a copy.
+   */
   copies(id: number): CopyRecord[] {
-    return this.statements.copies.all(id, id);
+    return this.statements.copies.all(id);
   }
 
   /** Present files that have an identical copy. */
@@ -548,6 +609,14 @@ interface FileRecordParams {
   fileId: string | null;
 }
 
+interface RelocateParams extends FileRecordParams {
+  id: number;
+  addedAt: number | null;
+  /** Read from the file now at `path`, if known. */
+  fingerprint: string | null;
+  contentHash: string | null;
+}
+
 interface StoredRead {
   id: number;
   size: number;
@@ -574,6 +643,21 @@ interface ThumbInfoRow {
 
 function toParams(record: FileRecord): FileRecordParams {
   return { ...record };
+}
+
+function toRecord(row: RecordRow): FileRecord {
+  return {
+    rootId: row.root_id,
+    path: row.path,
+    dir: row.dir,
+    name: row.name,
+    ext: row.ext,
+    kind: row.kind,
+    size: row.size,
+    mtimeMs: row.mtime_ms,
+    birthtimeMs: row.birthtime_ms,
+    fileId: row.file_id,
+  };
 }
 
 function storedRead({ id, size, mtimeMs }: FingerprintTarget, value: string): StoredRead {

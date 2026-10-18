@@ -63,8 +63,11 @@ export interface WorkerHostApi {
    * the file's tags to its copies, and returns its path. Throws when the file must not be trashed.
    */
   readonly prepareTrash: (id: number) => string;
-  /** After moving a file to the Trash (or failing to): drops it from the index if it is gone. */
-  readonly forgetFile: (id: number) => void;
+  /**
+   * After moving a file to the Trash (`trashed`) or failing to: drops it from the index if it is
+   * gone; if it stays, takes back the tags its copies were given for it.
+   */
+  readonly forgetFile: (id: number, trashed: boolean) => void;
   readonly shutdown: () => void;
 }
 

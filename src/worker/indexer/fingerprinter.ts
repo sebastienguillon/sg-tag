@@ -89,12 +89,22 @@ export class Fingerprinter {
   }
 
   private async run(target: FingerprintTarget): Promise<void> {
+    let moved = false;
     try {
       this.options.files.setFingerprint(target, await fingerprint(target.path, target.size));
     } catch {
-      this.failed.add(target.id);
+      // A target keeps the path it was queued with: the file may have been renamed since.
+      moved = this.options.files.pathOf(target.id) !== target.path;
+      if (!moved) {
+        this.failed.add(target.id);
+      }
     } finally {
       this.inflight.delete(target.id);
+    }
+    if (moved) {
+      // Read it where it is now (ahead of background work if tagged).
+      this.prioritize([target.id]);
+      this.wake();
     }
   }
 }

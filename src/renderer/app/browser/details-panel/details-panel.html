@@ -20,23 +20,27 @@
         }
       }
       <h2 class="title" [title]="file.name">{{ file.name }}</h2>
-      <div class="actions">
-        <button type="button" class="button" (click)="open(file.id)">
-          <app-icon name="external-link" /> Open
-        </button>
-        <button type="button" class="button" (click)="reveal(file.id)">
-          <app-icon name="folder-open" /> {{ revealLabel }}
-        </button>
-      </div>
-      @if (file.missing) {
-        <p class="notice">
-          <app-icon name="alert" /> This file is no longer on disk. It is kept because it is tagged,
-          and will be matched again if it reappears.
-        </p>
-      } @else if (file.offline) {
-        <p class="notice">
-          <app-icon name="hard-drive" /> On a drive or share that is not connected.
-        </p>
+      @if (fileTrashed()) {
+        <p class="notice"><app-icon name="trash" /> Moved to {{ trashName }}.</p>
+      } @else {
+        <div class="actions">
+          <button type="button" class="button" (click)="open(file.id)">
+            <app-icon name="external-link" /> Open
+          </button>
+          <button type="button" class="button" (click)="reveal(file.id)">
+            <app-icon name="folder-open" /> {{ revealLabel }}
+          </button>
+        </div>
+        @if (file.missing) {
+          <p class="notice">
+            <app-icon name="alert" /> This file is no longer on disk. It is kept because it is
+            tagged, and will be matched again if it reappears.
+          </p>
+        } @else if (file.offline) {
+          <p class="notice">
+            <app-icon name="hard-drive" /> On a drive or share that is not connected.
+          </p>
+        }
       }
     }
   } @else {
@@ -59,29 +63,33 @@
               <span class="chip-count">{{ tag.fileCount }}/{{ count() }}</span>
             }
           </button>
-          <button
-            type="button"
-            class="chip-remove"
-            [attr.aria-label]="`Remove tag ${tag.path}`"
-            (click)="removeTag(tag)"
-          >
-            <app-icon name="x" />
-          </button>
+          @if (!fileTrashed()) {
+            <button
+              type="button"
+              class="chip-remove"
+              [attr.aria-label]="`Remove tag ${tag.path}`"
+              (click)="removeTag(tag)"
+            >
+              <app-icon name="x" />
+            </button>
+          }
         </li>
       } @empty {
         <li class="no-tags">No tags yet</li>
       }
     </ul>
-    <app-tag-input [exclude]="completeTags()" (add)="addTag($event)" />
+    @if (!fileTrashed()) {
+      <app-tag-input [exclude]="completeTags()" (add)="addTag($event)" />
+    }
   </section>
 
   @if (count() === 1) {
     @if (file(); as file) {
-      @if (file.copies.length > 0 && !file.missing) {
+      @if (copies().length > 0 && !file.missing) {
         <section class="copies" aria-label="Identical copies">
-          <h3>Identical {{ file.copies.length === 1 ? 'copy' : 'copies' }}</h3>
+          <h3>Identical {{ copies().length === 1 ? 'copy' : 'copies' }}</h3>
           <ul class="copy-list">
-            @for (copy of file.copies; track copy.id) {
+            @for (copy of copies(); track copy.id) {
               <li class="copy">
                 <div class="copy-text">
                   <span class="copy-name">{{ copy.name }}</span>
@@ -103,42 +111,61 @@
                 >
                   <app-icon name="folder-open" />
                 </button>
-                <button
-                  type="button"
-                  class="icon-button"
-                  [title]="`Move to ${trashName}`"
-                  [attr.aria-label]="`Move ${copy.path} to ${trashName}`"
-                  [disabled]="copy.offline || trashing()"
-                  (click)="confirmTrash(copy.id)"
-                >
-                  <app-icon name="trash" />
-                </button>
+                @if (!fileTrashed()) {
+                  <button
+                    #copyTrash
+                    type="button"
+                    class="icon-button"
+                    [title]="staying(copy.id) === 0 ? othersOfflineTitle() : `Move to ${trashName}`"
+                    [attr.aria-label]="`Move ${copy.path} to ${trashName}`"
+                    [disabled]="copy.offline || staying(copy.id) === 0 || trashing()"
+                    (click)="confirmTrash(copy.id, copyTrash)"
+                  >
+                    <app-icon name="trash" />
+                  </button>
+                }
               </li>
             }
           </ul>
-          <div class="actions">
-            @if (copiesDiffer()) {
-              <button type="button" class="button" (click)="shareTags(file.id)">
-                <app-icon name="tag" /> Give all copies the same tags
+          @if (!fileTrashed()) {
+            <div class="actions">
+              @if (copiesDiffer()) {
+                <button type="button" class="button" (click)="shareTags(file.id)">
+                  <app-icon name="tag" /> Give all copies the same tags
+                </button>
+              }
+              <button
+                #fileTrash
+                type="button"
+                class="button"
+                [attr.title]="staying(file.id) === 0 ? othersOfflineTitle() : null"
+                [disabled]="file.offline || staying(file.id) === 0 || trashing()"
+                (click)="confirmTrash(file.id, fileTrash)"
+              >
+                <app-icon name="trash" /> Move this one to {{ trashName }}
               </button>
-            }
-            <button
-              type="button"
-              class="button"
-              [disabled]="file.offline || trashing()"
-              (click)="confirmTrash(file.id)"
-            >
-              <app-icon name="trash" /> Move this one to {{ trashName }}
-            </button>
-          </div>
+            </div>
+          }
           @if (trashTarget(); as target) {
-            <div class="confirm" role="alertdialog" aria-label="Confirm">
-              <p>
+            <div
+              class="confirm"
+              role="alertdialog"
+              aria-label="Confirm"
+              [attr.aria-describedby]="trashQuestionId"
+              (keydown.escape)="onConfirmEscape($event)"
+            >
+              <p [id]="trashQuestionId">
                 Move “{{ target.name }}” to {{ trashName }}? Its tags are first given to
-                {{ file.copies.length === 1 ? 'the copy that stays' : 'the copies that stay' }}.
+                {{ trashHeirs() }}.
               </p>
               <div class="actions">
-                <button type="button" class="button" (click)="confirmingTrash.set(null)">
+                <button
+                  #cancel
+                  type="button"
+                  class="button"
+                  [disabled]="trashing()"
+                  (click)="cancelTrash()"
+                >
                   Cancel
                 </button>
                 <button

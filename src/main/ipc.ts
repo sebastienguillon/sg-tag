@@ -1,6 +1,7 @@
 import { IpcChannel } from '@shared/desktop-api';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { trashFile } from './trash';
 import type { WorkerHost } from './worker-host';
 
 /** Main-process services for the renderer: folder picker, open/reveal/trash files, worker port. */
@@ -59,17 +60,9 @@ export function registerIpc(worker: WorkerHost, trustedOrigin: string): void {
     }
   });
 
-  // Only a file the indexer vouches for: an identical copy stays on disk and has its tags.
   ipcMain.handle(IpcChannel.trashFile, async (event, id: unknown) => {
-    if (!trusted(event) || !isFileId(id)) {
-      return;
-    }
-    const filePath = await worker.call('prepareTrash', id);
-    try {
-      await shell.trashItem(filePath);
-    } finally {
-      // Also when trashing failed: the indexer stops expecting the file to vanish.
-      await worker.call('forgetFile', id);
+    if (trusted(event) && isFileId(id)) {
+      await trashFile(worker, id, (filePath) => shell.trashItem(filePath));
     }
   });
 }

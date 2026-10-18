@@ -14,7 +14,12 @@ export interface TestLibrary {
   /** Inserts a file under `/library` and returns its id. `relativePath` uses `/`. */
   readonly addFile: (
     relativePath: string,
-    options?: { readonly size?: number; readonly mtimeMs?: number },
+    options?: {
+      readonly size?: number;
+      readonly mtimeMs?: number;
+      /** `<device>:<inode>`; none by default. */
+      readonly fileId?: string;
+    },
   ) => number;
 }
 
@@ -42,7 +47,7 @@ export function createTestLibrary(): TestLibrary {
       size: options.size ?? 1_000,
       mtimeMs: options.mtimeMs ?? clock++,
       birthtimeMs: null,
-      fileId: null,
+      fileId: options.fileId ?? null,
     });
   };
 

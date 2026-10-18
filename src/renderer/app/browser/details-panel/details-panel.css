@@ -5,6 +5,11 @@
   padding: 14px;
 }
 
+/* Only holds the focus between two controls: no ring around the whole panel. */
+:host:focus-visible {
+  outline: none;
+}
+
 .empty {
   display: grid;
   justify-items: center;
@@ -118,6 +123,11 @@ h3 {
   font-size: 12px;
 }
 
+/* No remove button once the file is in the Trash. */
+.chip-label:last-child {
+  padding-right: 10px;
+}
+
 .chip-count {
   margin-left: 4px;
   color: var(--text-muted);
@@ -169,6 +179,11 @@ dd {
   margin: 0 0 10px;
   padding: 0;
   list-style: none;
+}
+
+/* No actions below once the file is in the Trash. */
+.copy-list:last-child {
+  margin-bottom: 0;
 }
 
 .copy {

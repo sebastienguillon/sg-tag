@@ -8,12 +8,11 @@ import path from 'node:path';
 import type { Db } from './database/database';
 import { openDatabase } from './database/database';
 import { DuplicateFinder } from './duplicates/duplicate-finder';
-import { statFile } from './indexer/crawler';
+import { TrashGuard } from './duplicates/trash-guard';
 import { Fingerprinter } from './indexer/fingerprinter';
 import { Indexer } from './indexer/indexer';
 import type { ChangeSet } from './indexer/reconciler';
 import { Reconciler } from './indexer/reconciler';
-import type { ContentCandidate } from './library/files-repository';
 import { FilesRepository } from './library/files-repository';
 import type { RootRecord } from './library/roots-repository';
 import { RootsRepository } from './library/roots-repository';
@@ -96,8 +95,18 @@ export class Library {
     storeThumbnail: (id, png) => this.thumbnails.storeSystemThumbnail(id, png),
     resolvePath: (id) => this.files.pathOf(id),
     videoPath: (id) => this.files.videoPathOf(id),
-    prepareTrash: (id) => this.prepareTrash(id),
-    forgetFile: (id) => this.indexer.forget(id),
+    prepareTrash: async (id) => {
+      const filePath = await this.trash.prepare(id);
+      this.broadcast('tagsChanged', null);
+      return filePath;
+    },
+    forgetFile: async (id, trashed) => {
+      // At once, not behind the indexer's queue: the outcome is known, and a retry must not wait.
+      if (await this.trash.settle(id, trashed)) {
+        this.broadcast('tagsChanged', null);
+      }
+      await this.indexer.forget(id, trashed);
+    },
     shutdown: () => this.stop(),
   };
 
@@ -112,6 +121,7 @@ export class Library {
   private readonly thumbnails: Thumbnailer;
   private readonly fingerprinter: Fingerprinter;
   private readonly duplicates: DuplicateFinder;
+  private readonly trash: TrashGuard;
   private readonly tools: MediaTools;
   private readonly renderers = new Set<RpcServer<LibraryApi, LibraryEvents>>();
   private readonly changedIds = new Set<number>();
@@ -148,6 +158,8 @@ export class Library {
       offlineRootIds: () => this.indexer.offlineRootIds,
       onRendered: (id) => {
         this.markRendered(id);
+      },
+      onSettled: () => {
         this.scheduleStatus();
         this.fingerprinter.wake();
       },
@@ -164,6 +176,14 @@ export class Library {
       },
       onProgress: () => {
         this.scheduleStatus();
+      },
+    });
+    this.trash = new TrashGuard({
+      files: this.files,
+      tags: this.tags,
+      isOnline: (rootId) => this.indexer.isOnline(rootId),
+      expectDeletion: (id) => {
+        this.indexer.expectDeletion(id);
       },
     });
     if (this.tools.ffmpeg === null) {
@@ -301,38 +321,5 @@ export class Library {
       offline: offline.has(copy.rootId),
       tags: this.tags.forFile(copy.id),
     }));
-  }
-
-  /**
-   * Checks that `id` may go to the Trash: it and at least one identical copy are on disk, unchanged
-   * since their content was compared. Then gives its tags to those copies, so none are lost.
-   */
-  private async prepareTrash(id: number): Promise<string> {
-    const group = this.files.contentGroup(id);
-    const file = group.find((candidate) => candidate.id === id);
-    if (!file || !(await this.isUnchangedOnDisk(file))) {
-      throw new Error('This file changed since it was compared. Look for duplicates again.');
-    }
-    const kept: number[] = [];
-    for (const copy of group) {
-      if (copy.id !== id && (await this.isUnchangedOnDisk(copy))) {
-        kept.push(copy.id);
-      }
-    }
-    if (kept.length === 0) {
-      throw new Error('No identical copy of this file is on disk any more, so it was kept.');
-    }
-    this.tags.copyTags([id], kept);
-    this.broadcast('tagsChanged', null);
-    this.indexer.expectDeletion(id);
-    return file.path;
-  }
-
-  private async isUnchangedOnDisk(file: ContentCandidate): Promise<boolean> {
-    if (!this.indexer.isOnline(file.rootId)) {
-      return false;
-    }
-    const disk = await statFile(file.path);
-    return disk !== null && disk.size === file.size && disk.mtimeMs === file.mtimeMs;
   }
 }

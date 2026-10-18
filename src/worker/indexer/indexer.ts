@@ -124,8 +124,15 @@ export class Indexer {
     this.reconciler.expectDeletion(id);
   }
 
-  /** After the app tried to move `id` to the Trash: drops it, unless it is still on disk. */
-  async forget(id: number): Promise<void> {
+  /**
+   * After the app tried to move `id` to the Trash. If it did (`trashed`), drops it, unless it is
+   * still on disk. If not, at once, it is a file like any other again: followed if it moves next.
+   */
+  async forget(id: number, trashed: boolean): Promise<void> {
+    if (!trashed) {
+      this.reconciler.cancelDeletion(id);
+      return;
+    }
     this.emit(await this.enqueue(() => this.reconciler.forget(id)));
   }
 
