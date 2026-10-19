@@ -32,15 +32,16 @@ if (app.requestSingleInstanceLock()) {
 async function main(): Promise<void> {
   await app.whenReady();
 
+  const dataDir = app.getPath('userData');
   const worker = new WorkerHost({
     entry: path.join(import.meta.dirname, 'worker.js'),
-    dataDir: app.getPath('userData'),
+    dataDir,
     resourcesDir: process.resourcesPath,
   });
   worker.start();
 
   handleProtocols(worker, path.join(app.getAppPath(), 'dist', 'renderer', 'browser'));
-  registerIpc(worker, new URL(rendererUrl).origin);
+  registerIpc(worker, new URL(rendererUrl).origin, dataDir);
   hardenSession();
 
   const openWindow = (): BrowserWindow =>

@@ -119,6 +119,15 @@ export class Indexer {
     });
   }
 
+  /** Resolves once every queued indexing task has settled, including tasks queued meanwhile. */
+  async whenIdle(): Promise<void> {
+    let tail: Promise<void>;
+    do {
+      tail = this.queue;
+      await tail;
+    } while (tail !== this.queue);
+  }
+
   /** The app is about to move `id` to the Trash: it must not be taken for a moved file. */
   expectDeletion(id: number): void {
     this.reconciler.expectDeletion(id);

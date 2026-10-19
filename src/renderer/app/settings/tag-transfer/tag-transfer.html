@@ -1,0 +1,212 @@
+@let tagged = taggedFiles();
+@let exportState = store.exportState();
+@let importState = store.importState();
+@let progress = store.progress();
+@let tags = tagCount();
+@let removing = store.removingFolder();
+
+<p class="lead">
+  Tags are kept only in SG Tag’s data folder, never in your files: that folder holds their only
+  copy. Export them to a file you keep elsewhere, to restore them later or bring them to another
+  computer.
+</p>
+
+@if (dataDir(); as path) {
+  <dl>
+    <dt>Data folder</dt>
+    <dd>
+      <code>{{ path }}</code>
+    </dd>
+  </dl>
+}
+
+@if (tagged !== null) {
+  <p class="counts">
+    {{ tagged | number }} tagged file{{ tagged === 1 ? '' : 's' }} · {{ tags | number }} tag{{
+      tags === 1 ? '' : 's'
+    }}
+    @if (store.lastExport.hasValue()) {
+      @if (store.lastExport.value(); as record) {
+        · <span [title]="record.path">Last exported on {{ record.at | date: 'longDate' }}</span>
+      } @else {
+        · Never exported
+      }
+    }
+  </p>
+}
+
+<div class="actions">
+  <button
+    type="button"
+    class="button"
+    [attr.aria-disabled]="!store.canExport() || tagged === 0 ? 'true' : null"
+    [attr.aria-describedby]="tagged === 0 || removing ? hintId : null"
+    (click)="export()"
+  >
+    Export tags…
+  </button>
+  <button
+    #importButton
+    type="button"
+    class="button"
+    [attr.aria-disabled]="store.busy() ? 'true' : null"
+    (click)="open()"
+  >
+    Import tags…
+  </button>
+</div>
+@if (tagged === 0) {
+  <p class="hint" [id]="hintId">Nothing to export yet: no file is tagged.</p>
+} @else if (removing) {
+  <p class="hint" [id]="hintId">
+    A library folder is being removed: export the tags once that is done.
+  </p>
+}
+
+@if (exportState.step === 'busy' || store.exportingElsewhere()) {
+  <p class="activity" role="status">
+    <app-icon class="spin" name="loader" />
+    <span>
+      Exporting tags…
+      @if (progress?.step === 'exporting' && progress.total > 0) {
+        {{ progress.done | number }} of {{ progress.total | number }} files
+      }
+    </span>
+  </p>
+} @else if (exportState.step === 'done') {
+  @let exported = exportState.result;
+  <div class="outcome" role="status">
+    <p>
+      Exported the tags of {{ exported.files | number }} file{{ exported.files === 1 ? '' : 's' }}
+      @if (exported.missing > 0) {
+        @if (exported.files === 1) {
+          (missing from disk)
+        } @else {
+          ({{ exported.missing | number }} of them missing from disk)
+        }
+      }
+      to <code>{{ exported.path }}</code
+      >. Keep it with your backups.
+    </p>
+    @if (exported.leftOut > 0) {
+      <!--
+        The indexer's limits: MAX_TAG_LENGTH, MAX_TAG_DEPTH, MAX_MARK_RUN and MAX_TAGS in
+        tag-file.ts. Past MAX_TAGS, a tag is left out of some of its files only.
+      -->
+      <p>
+        {{ exported.leftOut | number }} tag{{ exported.leftOut === 1 ? '' : 's' }} could not be
+        exported for some or all of {{ exported.leftOut === 1 ? 'its' : 'their' }} files: a tags
+        export cannot hold tags longer than 1,024 characters, nested more than 64 levels deep, with
+        more than 30 combining marks in a row, or past 1,000 on a file.
+      </p>
+    }
+  </div>
+} @else if (exportState.step === 'error') {
+  <p class="error" role="alert">{{ exportState.message }}</p>
+}
+
+@if (importState.step === 'preview' || importState.step === 'applying') {
+  <app-tag-import-preview
+    [source]="importState.source"
+    [preview]="importState.preview"
+    [offlineFolders]="offlineFolders()"
+  />
+}
+
+<!-- Nothing to say while the open dialog is up: the line comes once the chosen file is read. -->
+@if (
+  (importState.step === 'opening' && progress?.step === 'reading') ||
+  importState.step === 'planning' ||
+  importState.step === 'applying' ||
+  store.importingElsewhere()
+) {
+  <div class="activity">
+    <app-icon class="spin" name="loader" />
+    <span role="status">
+      @if (importState.step === 'opening') {
+        Reading the tags export…
+        @if (progress?.step === 'reading' && progress.total > 0) {
+          {{ progress.done / progress.total | percent }}
+        }
+      } @else if (importState.step !== 'planning') {
+        <!-- Applied here, or by a window closed or reloaded since. -->
+        Importing tags…
+        @if (progress?.step === 'importing' && progress.total > 0) {
+          {{ progress.done | number }} of {{ progress.total | number }} files
+        }
+      } @else if (progress?.step === 'waiting') {
+        Waiting for indexing to finish, so that every file can be found…
+      } @else if (progress?.step === 'comparing') {
+        Comparing contents…
+        @if (progress.total > 0) {
+          {{ progress.done | number }} of {{ progress.total | number }} files read
+        }
+      } @else {
+        Looking for the {{ importState.source.files | number }} file{{
+          importState.source.files === 1 ? '' : 's'
+        }}
+        of the tags export…
+        @if (progress?.step === 'matching' && progress.total > 0) {
+          {{ progress.done | number }} done
+        }
+      }
+    </span>
+    @if (importState.step === 'opening' || importState.step === 'planning') {
+      <button type="button" class="button" (click)="cancel()">Cancel</button>
+    }
+  </div>
+} @else if (importState.step === 'done') {
+  @let result = importState.result;
+  <div class="outcome" role="status">
+    <p>
+      @if (result.assignments === 0 && result.skipped === 0) {
+        Nothing was added: the files already have these tags.
+      } @else if (result.assignments === 0) {
+        Nothing was added.
+      } @else if (result.newTags > 0) {
+        Added {{ result.assignments | number }} tag{{ result.assignments === 1 ? '' : 's' }} to
+        {{ result.files | number }} file{{ result.files === 1 ? '' : 's' }}, and created
+        {{ result.newTags | number }} new tag{{ result.newTags === 1 ? '' : 's' }}.
+      } @else {
+        Added {{ result.assignments | number }} tag{{ result.assignments === 1 ? '' : 's' }} to
+        {{ result.files | number }} file{{ result.files === 1 ? '' : 's' }}.
+      }
+    </p>
+    @if (result.notFound > 0) {
+      <p>
+        {{ result.notFound | number }} file{{ result.notFound === 1 ? '' : 's' }} of the tags export
+        {{ result.notFound === 1 ? 'was' : 'were' }} not found, so
+        {{ result.notFound === 1 ? 'its' : 'their' }} tags were not imported. Import the same tags
+        export again once {{ result.notFound === 1 ? 'it is' : 'they are' }} in your library
+        folders: tags already imported are skipped.
+      </p>
+    }
+    @if (result.skipped > 0) {
+      <p>
+        {{ result.skipped | number }} file{{ result.skipped === 1 ? '' : 's' }} changed or left the
+        library during the import and {{ result.skipped === 1 ? 'was' : 'were' }} left out: import
+        the tags export again to include them.
+      </p>
+    }
+  </div>
+} @else if (importState.step === 'error') {
+  <div class="outcome error" role="alert">
+    <p>{{ importState.message }}</p>
+    @if (importState.stopped) {
+      <p>The tags added before the import stopped are kept: check again to import the rest.</p>
+    }
+  </div>
+  @if (importState.source !== null) {
+    <div class="actions">
+      <button
+        type="button"
+        class="button"
+        [attr.aria-disabled]="store.busy() ? 'true' : null"
+        (click)="check()"
+      >
+        Check again
+      </button>
+      <button type="button" class="button" (click)="cancel()">Close</button>
+    </div>
+  }
+}

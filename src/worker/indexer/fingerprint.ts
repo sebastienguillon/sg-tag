@@ -5,6 +5,12 @@ import { open } from 'node:fs/promises';
 const CHUNK = 64 * 1024;
 
 /**
+ * Names how `fingerprint()` is computed, in tags exports: change it whenever `fingerprint()`
+ * changes, so that fingerprints from older exports are ignored rather than compared.
+ */
+export const FINGERPRINT_SCHEME = 'sha256(size,head64k,tail64k)/32';
+
+/**
  * Cheap content identity: hash of the size plus the first and last 64 KiB. Enough to recognise a
  * file that was moved to another volume (where its inode changes) without reading it whole.
  */

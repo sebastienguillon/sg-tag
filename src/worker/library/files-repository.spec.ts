@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createTestLibrary } from '../testing/test-library';
+import type { ImportCandidate } from './files-repository';
 
 describe('FilesRepository', () => {
   it('only hands out the paths of videos that are on disk, for streaming', () => {
@@ -83,6 +84,135 @@ describe('FilesRepository', () => {
     expect(files.copies(photo).map((other) => other.id)).toEqual([copy]);
     expect(files.copies(copy).map((other) => other.id)).toEqual([link, photo]);
     expect(files.countWithCopy()).toBe(3);
+  });
+
+  it('finds present and missing files of some sizes, but never empty ones', () => {
+    const { files, root, addFile } = createTestLibrary();
+    const present = addFile('trips/a.jpg', { size: 10, mtimeMs: 5, fingerprint: 'print' });
+    const gone = addFile('b.jpg', { size: 20, contentHash: 'hash', missingSince: 1 });
+    addFile('other-size.jpg', { size: 30 });
+    addFile('empty.jpg', { size: 0 });
+
+    const found = files.withSizes([10, 20, 0]).sort((a, b) => a.id - b.id);
+    expect(found).toEqual([
+      {
+        id: present,
+        rootId: root.id,
+        path: '/library/trips/a.jpg',
+        dir: 'trips',
+        name: 'a.jpg',
+        size: 10,
+        mtimeMs: 5,
+        fileId: null,
+        fingerprint: 'print',
+        contentHash: null,
+        missing: false,
+      },
+      expect.objectContaining({ id: gone, contentHash: 'hash', missing: true }),
+    ]);
+  });
+
+  it('pages through files of some sizes by size, then id, a size across pages included', () => {
+    const { files, roots, root, addFile } = createTestLibrary();
+    const other = roots.insert('/other');
+    const a = addFile('a.jpg', { size: 20 });
+    const b = addFile('b.jpg', { size: 10 });
+    const c = addFile('c.jpg', { size: 20, missingSince: 1 });
+    const d = addFile('d.jpg', { size: 10, root: other });
+    const e = addFile('e.jpg', { size: 30 });
+    const f = addFile('f.jpg', { size: 20 });
+    addFile('g.jpg', { size: 40 });
+    const sizes = [30, 20, 10];
+    const byOrder = [b, d, a, c, f, e];
+
+    expect(files.withSizes(sizes).map((file) => file.id)).toEqual(byOrder);
+    for (const limit of [1, 2, 4]) {
+      const pages: number[][] = [];
+      let page: ImportCandidate[] = [];
+      do {
+        page = files.withSizes(sizes, limit, page.at(-1) ?? null);
+        pages.push(page.map((file) => file.id));
+      } while (page.length === limit);
+      expect(pages.flat()).toEqual(byOrder);
+      expect(pages.every((ids) => ids.length <= limit)).toBe(true);
+    }
+    expect(files.withSizes(sizes, 2, { size: 20, id: a })).toEqual([
+      expect.objectContaining({ id: c, rootId: root.id, missing: true }),
+      expect.objectContaining({ id: f, missing: false }),
+    ]);
+  });
+
+  it('finds files by name within one library folder, folding ASCII case only', () => {
+    const { files, roots, root, addFile } = createTestLibrary();
+    const other = roots.insert('/other');
+    const nested = addFile('2024/IMG_0001.JPG');
+    const lower = addFile('img_0001.jpg', { missingSince: 1 });
+    addFile('IMG_0001.JPG', { root: other });
+    addFile('ÉTÉ.jpg');
+
+    const ids = (name: string): number[] =>
+      files
+        .named(name, root.id)
+        .map((file) => file.id)
+        .sort((a, b) => a - b);
+    expect(ids('Img_0001.jpg')).toEqual([nested, lower]);
+    expect(files.named('img_0001.jpg', root.id).find((file) => file.id === lower)?.missing).toBe(
+      true,
+    );
+    expect(ids('été.jpg')).toEqual([]);
+    expect(ids('ÉTÉ.jpg')).toHaveLength(1);
+  });
+
+  it('pages through tagged files by id, missing ones included', () => {
+    const { files, tags, root, addFile } = createTestLibrary();
+    const a = addFile('a.jpg');
+    addFile('untagged.jpg');
+    const c = addFile('trips/c.jpg', { missingSince: 1 });
+    const d = addFile('d.jpg');
+    tags.addToFiles([d, a], ['x']);
+    tags.addToFiles([d, c], ['y']);
+
+    const first = files.taggedPage(0, 2);
+    expect(first.map((file) => [file.id, file.missing])).toEqual([
+      [a, false],
+      [c, true],
+    ]);
+    expect(first[1]).toEqual({
+      id: c,
+      rootId: root.id,
+      path: '/library/trips/c.jpg',
+      dir: 'trips',
+      name: 'c.jpg',
+      size: 1_000,
+      mtimeMs: expect.any(Number) as number,
+      fingerprint: null,
+      contentHash: null,
+      missing: true,
+    });
+    // `d` has two tags but comes once.
+    expect(files.taggedPage(c, 2).map((file) => file.id)).toEqual([d]);
+    expect(files.taggedPage(d, 2)).toEqual([]);
+  });
+
+  it('takes snapshots of the files still indexed', () => {
+    const { files, root, addFile } = createTestLibrary();
+    const kept = addFile('trips/a.jpg', { size: 10, mtimeMs: 5 });
+    const gone = addFile('c.jpg', { size: 20, mtimeMs: 6, missingSince: 1 });
+    const deleted = addFile('b.jpg');
+    files.delete([deleted]);
+
+    expect(files.snapshots([kept, gone, deleted, 999])).toEqual([
+      {
+        id: kept,
+        rootId: root.id,
+        dir: 'trips',
+        name: 'a.jpg',
+        size: 10,
+        mtimeMs: 5,
+        missing: false,
+      },
+      { id: gone, rootId: root.id, dir: '', name: 'c.jpg', size: 20, mtimeMs: 6, missing: true },
+    ]);
   });
 
   it('keeps what was read from a file only while it is the same file', () => {

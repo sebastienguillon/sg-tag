@@ -19,3 +19,12 @@ export const DESKTOP = new InjectionToken<DesktopBridge>('DesktopBridge', {
     return bridge;
   },
 });
+
+/**
+ * The message of an error from a `DesktopBridge` call, without the channel name Electron prefixes
+ * to errors thrown in the main process.
+ */
+export function ipcErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '');
+}

@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import type { DesktopBridge } from '@shared/desktop-api';
 import type { FileSummary, SearchRequest, SearchResult } from '@shared/model';
 import { FakeWorkerClient, fakeDesktop, settle } from '../testing/fake-worker-client';
 import { DESKTOP } from './desktop';
@@ -20,12 +21,15 @@ function summary(id: number, name = `file-${id}.jpg`): FileSummary {
   };
 }
 
-function setup(): { store: LibraryStore; worker: FakeWorkerClient } {
+function setup(desktop: DesktopBridge = fakeDesktop): {
+  store: LibraryStore;
+  worker: FakeWorkerClient;
+} {
   const worker = new FakeWorkerClient();
   TestBed.configureTestingModule({
     providers: [
       { provide: WorkerClient, useValue: worker },
-      { provide: DESKTOP, useValue: fakeDesktop },
+      { provide: DESKTOP, useValue: desktop },
     ],
   });
   return { store: TestBed.inject(LibraryStore), worker };
@@ -103,5 +107,16 @@ describe('LibraryStore', () => {
     await settle();
     expect(worker.callsTo('getFiles').at(-1)).toEqual([[1]]);
     expect(store.summary(1)?.name).toBe('after.jpg');
+  });
+
+  it('says why a file was not moved to the Trash, without the channel name', async () => {
+    const { store } = setup({
+      ...fakeDesktop,
+      trashFile: () =>
+        Promise.reject(
+          new Error("Error invoking remote method 'shell:trash-file': Error: No identical copy."),
+        ),
+    });
+    await expect(store.trash(1)).rejects.toThrow(/^No identical copy\.$/);
   });
 });

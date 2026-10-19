@@ -19,6 +19,8 @@ import { RootsRepository } from './library/roots-repository';
 import { SettingsRepository } from './library/settings-repository';
 import { TagsRepository } from './library/tags-repository';
 import { SearchService } from './search/search-service';
+import { TagExporter } from './tag-transfer/tag-exporter';
+import { TagImporter } from './tag-transfer/tag-importer';
 import type { MediaTools } from './thumbnails/media-tools';
 import { locateMediaTools } from './thumbnails/media-tools';
 import { Thumbnailer } from './thumbnails/thumbnailer';
@@ -76,18 +78,41 @@ export class Library {
       return this.describeRoot(root);
     },
     removeRoot: async (id) => {
-      const removed = await this.indexer.removeRoot(id);
+      if (this.exporter.busy) {
+        // Its tags would go missing from the export being written, which would not say so.
+        throw new Error('Tags are being exported: remove the folder once that is done.');
+      }
+      // Every window is told (`removingFolders`), whichever one started it: none offers to export
+      // tags meanwhile.
+      this.removals++;
+      this.scheduleStatus();
+      const removed = await this.indexer.removeRoot(id).finally(() => {
+        this.removals--;
+        // Removed or not: the status sent shortly after also counts the files left.
+        this.scheduleStatus();
+      });
       this.tags.pruneUnused();
       this.broadcast('rootsChanged', null);
       this.broadcast('tagsChanged', null);
       this.markChanged(null);
-      this.scheduleStatus();
       await this.thumbnails.remove(removed);
     },
     getSettings: () => this.settings.get(),
     updateSettings: (patch) => this.settings.update(patch),
     getStatus: () => this.status(),
     getDiagnostics: () => this.diagnostics(),
+    getLastTagExport: () => this.settings.lastTagExport(),
+    planTagImport: (token) => {
+      this.refuseImportWhileExporting();
+      return this.importer.plan(token);
+    },
+    applyTagImport: (token, planId, includeChanged) => {
+      this.refuseImportWhileExporting();
+      return this.importer.apply(token, planId, includeChanged);
+    },
+    closeTagImport: () => {
+      this.importer.close();
+    },
   };
 
   readonly hostHandlers: RpcHandlers<WorkerHostApi> = {
@@ -107,6 +132,19 @@ export class Library {
       }
       await this.indexer.forget(id, trashed);
     },
+    exportTags: (destination, appVersion) => {
+      if (this.importer.busy) {
+        throw new Error('Tags are being imported: export them once that is done.');
+      }
+      if (this.removals > 0) {
+        throw new Error('A library folder is being removed: export the tags once that is done.');
+      }
+      return this.exporter.export(destination, appVersion);
+    },
+    openTagImport: (filePath) => {
+      this.refuseImportWhileExporting();
+      return this.importer.open(filePath);
+    },
     shutdown: () => this.stop(),
   };
 
@@ -122,6 +160,8 @@ export class Library {
   private readonly fingerprinter: Fingerprinter;
   private readonly duplicates: DuplicateFinder;
   private readonly trash: TrashGuard;
+  private readonly exporter: TagExporter;
+  private readonly importer: TagImporter;
   private readonly tools: MediaTools;
   private readonly renderers = new Set<RpcServer<LibraryApi, LibraryEvents>>();
   private readonly changedIds = new Set<number>();
@@ -131,6 +171,11 @@ export class Library {
   private mediaChangedTimer: NodeJS.Timeout | undefined;
   private statusTimer: NodeJS.Timeout | undefined;
   private lastOffline = '';
+  /**
+   * Library folders being removed, from any window (`IndexStatus.removingFolders`): no tags export
+   * may start until their files are gone.
+   */
+  private removals = 0;
 
   constructor(config: WorkerConfig) {
     this.config = config;
@@ -186,6 +231,39 @@ export class Library {
         this.indexer.expectDeletion(id);
       },
     });
+    this.exporter = new TagExporter({
+      files: this.files,
+      tags: this.tags,
+      roots: this.roots,
+      settings: this.settings,
+      exportsDir: path.join(config.dataDir, 'exports'),
+      isOnline: (rootId) => this.indexer.isOnline(rootId),
+      onProgress: () => {
+        this.scheduleStatus();
+      },
+    });
+    this.importer = new TagImporter({
+      files: this.files,
+      tags: this.tags,
+      roots: this.roots,
+      isOnline: (rootId) => this.indexer.isOnline(rootId),
+      whenIndexed: () => this.indexer.whenIdle(),
+      // `tag:` and `is:untagged` results change: renderers search again.
+      onTagged: (ids) => {
+        this.markChanged(ids);
+      },
+      onImported: (ids) => {
+        this.broadcast('tagsChanged', null);
+        // Library folders show how many files are tagged.
+        this.broadcast('rootsChanged', null);
+        this.fingerprinter.prioritize(ids);
+        // No duplicate check, unlike addTags: an import can tag thousands of files at once, and
+        // checking them would read whole files. Find duplicates stays available.
+      },
+      onProgress: () => {
+        this.scheduleStatus();
+      },
+    });
     if (this.tools.ffmpeg === null) {
       log.warn('ffmpeg not found: video thumbnails fall back to the OS thumbnailer, if any.');
     }
@@ -193,11 +271,18 @@ export class Library {
 
   async start(): Promise<void> {
     await this.indexer.start();
+    this.exporter.cleanUp().catch((error: unknown) => {
+      log.warn('Cannot clean up tags exports:', errorMessage(error));
+    });
     this.thumbnails.startBackground();
     this.fingerprinter.startBackground();
   }
 
   async stop(): Promise<void> {
+    this.importer.close();
+    // Before the database closes: an export being written or saved is abandoned and its files
+    // deleted.
+    await this.exporter.stop();
     clearTimeout(this.filesChangedTimer);
     clearTimeout(this.mediaChangedTimer);
     clearTimeout(this.statusTimer);
@@ -291,6 +376,8 @@ export class Library {
       pendingThumbnails: this.files.countPendingThumbnails(),
       offlineRoots: this.indexer.offlineRootIds.length,
       duplicateCheck: this.duplicates.progress,
+      tagTransfer: this.exporter.progress ?? this.importer.progress,
+      removingFolders: this.removals,
     };
   }
 
@@ -302,6 +389,13 @@ export class Library {
       sqlite,
       dataDir: this.config.dataDir,
     };
+  }
+
+  /** One tags transfer at a time. */
+  private refuseImportWhileExporting(): void {
+    if (this.exporter.busy) {
+      throw new Error('Tags are being exported: import them once that is done.');
+    }
   }
 
   private describeRoot(root: RootRecord): LibraryRoot {

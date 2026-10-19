@@ -1,0 +1,256 @@
+@let file = source();
+@let plan = preview();
+@let toAdd = additions();
+
+<h3 [id]="headingId">Import tags from “{{ file.name }}”?</h3>
+<p class="about">
+  @if (exportedAt(); as at) {
+    Exported on {{ at | date: 'longDate' }}
+    @if (exportedFrom(); as computer) {
+      from {{ computer }}
+    }
+    ·
+  } @else if (exportedFrom(); as computer) {
+    Exported from {{ computer }} ·
+  }
+  {{ file.files | number }} tagged file{{ file.files === 1 ? '' : 's' }} ·
+  {{ file.tags | number }} tag{{ file.tags === 1 ? '' : 's' }}
+</p>
+<p>
+  Tags are added to files already in your library folders. No file is copied, moved or changed, and
+  no tag is removed.
+</p>
+@if (file.invalid > 0) {
+  <p>
+    {{ file.invalid | number }} line{{ file.invalid === 1 ? '' : 's' }} of the tags export could not
+    be read in full: what could not be read is left out.
+  </p>
+  <details>
+    <summary>Why</summary>
+    <ul class="paths" tabindex="0" aria-label="Lines not read in full">
+      @for (problem of file.problems; track $index) {
+        <li>{{ problem }}</li>
+      }
+    </ul>
+  </details>
+}
+
+@if (found() > 0) {
+  <p>
+    {{ found() | number }} of {{ file.files | number }} file{{ file.files === 1 ? '' : 's' }}
+    found.
+  </p>
+}
+<ul class="counts">
+  @if (plan.found.samePlace > 0) {
+    <li>{{ plan.found.samePlace | number }} at the same place</li>
+  }
+  @if (plan.found.moved > 0) {
+    <li>
+      {{ plan.found.moved | number }} renamed or moved since the export, recognised by
+      {{ plan.found.moved === 1 ? 'its' : 'their' }} content
+      <details>
+        <summary>Show<span class="visually-hidden"> the files renamed or moved</span></summary>
+        <ul class="paths" tabindex="0" aria-label="Files renamed or moved">
+          @for (item of plan.movedItems; track $index) {
+            <li>
+              {{ item.exported }} <span class="current">→ {{ item.current }}</span>
+            </li>
+          }
+          @if (plan.found.moved > plan.movedItems.length) {
+            <li class="more">
+              … and {{ plan.found.moved - plan.movedItems.length | number }} more
+            </li>
+          }
+        </ul>
+      </details>
+    </li>
+  }
+  @if (plan.found.shared > 0) {
+    <li>
+      {{ plan.found.shared | number }} identical
+      {{ plan.found.shared === 1 ? 'copy' : 'copies' }} in the export
+      {{ plan.found.shared === 1 ? 'was' : 'were' }} found as one file here, which gets the tags of
+      each
+    </li>
+  }
+</ul>
+@if (plan.changed > 0) {
+  <div class="changed">
+    <label>
+      <input
+        #changed
+        type="checkbox"
+        [checked]="includeChanged()"
+        [attr.aria-disabled]="locked() ? 'true' : null"
+        (click)="guardChanged($event)"
+        (change)="includeChanged.set(changed.checked)"
+      />
+      Also tag the {{ plan.changed | number }} file{{ plan.changed === 1 ? '' : 's' }} at the same
+      place that changed since the export, or could not be compared
+    </label>
+    <details>
+      <summary>Show<span class="visually-hidden"> the files that changed</span></summary>
+      <ul class="paths" tabindex="0" aria-label="Files that changed">
+        @for (item of plan.changedItems; track $index) {
+          <li>{{ item.exported }}</li>
+        }
+        @if (plan.changed > plan.changedItems.length) {
+          <li class="more">… and {{ plan.changed - plan.changedItems.length | number }} more</li>
+        }
+      </ul>
+    </details>
+  </div>
+}
+
+@if (notFound() > 0) {
+  <p>
+    {{ notFound() | number }} file{{ notFound() === 1 ? '' : 's' }} not found:
+    {{ notFound() === 1 ? 'its' : 'their' }} tags are not imported.
+  </p>
+  <ul class="counts">
+    @if (plan.notFound.missing > 0) {
+      <li>
+        {{ plan.notFound.missing | number }} {{ plan.notFound.missing === 1 ? 'was' : 'were' }}
+        already missing from disk when the tags export was made
+      </li>
+    }
+    @if (plan.notFound.uncompared > 0) {
+      <li>
+        {{ plan.notFound.uncompared | number }} may be on a drive that is not connected: connect it,
+        then check again
+      </li>
+    }
+    @if (plan.notFound.folder > 0) {
+      <li>
+        {{ plan.notFound.folder | number }} {{ plan.notFound.folder === 1 ? 'was' : 'were' }} in a
+        library folder that is not in this library
+      </li>
+    }
+    @if (plan.notFound.notFound > 0) {
+      <li>
+        {{ plan.notFound.notFound | number }}
+        {{ plan.notFound.notFound === 1 ? 'was' : 'were' }} not found
+      </li>
+    }
+  </ul>
+  <details>
+    <summary>Show the files not found</summary>
+    <ul class="paths" tabindex="0" aria-label="Files not found">
+      @for (item of plan.missedItems; track $index) {
+        <li>
+          {{ item.exported }} <span class="reason">{{ reasonLabels[item.reason] }}</span>
+        </li>
+      }
+      @if (notFound() > plan.missedItems.length) {
+        <li class="more">… and {{ notFound() - plan.missedItems.length | number }} more</li>
+      }
+    </ul>
+  </details>
+}
+
+@if (showFolders()) {
+  <h4>Library folders in the tags export</h4>
+  <ul class="folders">
+    @for (folder of plan.folders; track $index) {
+      <li class="folder">
+        <div class="path">{{ folder.exported }}</div>
+        <div>
+          @if (folder.foundIn.length > 0) {
+            found in <span class="path">{{ folder.foundIn.join(', ') }}</span>
+          } @else if (folder.inLibrary) {
+            none found here
+            @if (offlineFolders().has(folder.exported)) {
+              · offline
+            }
+          } @else {
+            not in this library
+          }
+        </div>
+        <div class="tally">{{ folder.found | number }} of {{ folder.files | number }}</div>
+        @if (folder.addable) {
+          <p class="note">
+            This folder exists on this computer.
+            <button
+              type="button"
+              class="button"
+              [attr.aria-disabled]="locked() ? 'true' : null"
+              (click)="addFolder(folder.exported)"
+            >
+              {{ adding() === folder.exported ? 'Adding…' : 'Add as library folder' }}
+            </button>
+          </p>
+          @if (addError(); as error) {
+            @if (error.folder === folder.exported) {
+              <p class="note error" role="alert">{{ error.message }}</p>
+            }
+          }
+        }
+        @if (folder.suspicious) {
+          <p class="note warning">
+            <app-icon name="alert" /> Most files at their place here have other content: another
+            drive or card may be mounted at this place, so they were not tagged.
+          </p>
+        }
+      </li>
+    }
+  </ul>
+}
+
+<p class="summary" [id]="summaryId">
+  @if (nothingFound()) {
+    None of these files were found in your library folders. Add the folders that hold them, here or
+    in Library folders, then check again.
+  } @else if (toAdd.assignments === 0) {
+    Nothing to add: the files found already have all these tags.
+  } @else if (toAdd.newTags > 0) {
+    Importing adds {{ toAdd.assignments | number }} tag{{ toAdd.assignments === 1 ? '' : 's' }} to
+    {{ toAdd.files | number }} file{{ toAdd.files === 1 ? '' : 's' }}, and creates
+    {{ toAdd.newTags | number }} new tag{{ toAdd.newTags === 1 ? '' : 's' }}.
+  } @else {
+    Importing adds {{ toAdd.assignments | number }} tag{{ toAdd.assignments === 1 ? '' : 's' }} to
+    {{ toAdd.files | number }} file{{ toAdd.files === 1 ? '' : 's' }}.
+  }
+</p>
+
+<div class="actions">
+  <button
+    type="button"
+    class="button"
+    [attr.aria-disabled]="locked() ? 'true' : null"
+    (click)="check()"
+  >
+    Check again
+  </button>
+  <span class="spacer"></span>
+  @if (canImport()) {
+    <button
+      type="button"
+      class="button"
+      [attr.aria-disabled]="applying() ? 'true' : null"
+      (click)="cancel()"
+    >
+      Cancel
+    </button>
+    <button
+      #primary
+      type="button"
+      class="button primary"
+      [attr.aria-disabled]="locked() ? 'true' : null"
+      [attr.aria-describedby]="summaryId"
+      (click)="apply()"
+    >
+      Import tags
+    </button>
+  } @else {
+    <button
+      #primary
+      type="button"
+      class="button primary"
+      [attr.aria-describedby]="summaryId"
+      (click)="cancel()"
+    >
+      Close
+    </button>
+  }
+</div>

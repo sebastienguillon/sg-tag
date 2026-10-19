@@ -8,6 +8,11 @@ import type {
   SearchResult,
   Settings,
   Tag,
+  TagExportRecord,
+  TagExportResult,
+  TagImportPreview,
+  TagImportResult,
+  TagImportSource,
   TagUsage,
 } from './model';
 
@@ -31,6 +36,25 @@ export interface LibraryApi {
   readonly updateSettings: (patch: Partial<Settings>) => Settings;
   readonly getStatus: () => IndexStatus;
   readonly getDiagnostics: () => Diagnostics;
+  /** The latest tags export saved from this library, if any. */
+  readonly getLastTagExport: () => TagExportRecord | null;
+  /**
+   * Matches the tags export opened as `token` (`DesktopBridge.openTagImport`) against the library,
+   * once indexing has settled. Adds no tags; fingerprints read on the way are kept, as the
+   * background fingerprinter would. A newer call cancels one still running.
+   */
+  readonly planTagImport: (token: string) => TagImportPreview;
+  /**
+   * Adds the tags of preview `planId` (with its changed files if `includeChanged`); never removes
+   * any. Throws when the preview is out of date.
+   */
+  readonly applyTagImport: (
+    token: string,
+    planId: number,
+    includeChanged: boolean,
+  ) => TagImportResult;
+  /** Stops reading or matching a tags export and forgets it; an import being applied finishes. */
+  readonly closeTagImport: () => void;
 }
 
 export interface LibraryEvents {
@@ -68,6 +92,17 @@ export interface WorkerHostApi {
    * gone; if it stays, takes back the tags its copies were given for it.
    */
   readonly forgetFile: (id: number, trashed: boolean) => void;
+  /**
+   * Writes every tagged file and its tags to `destination`, the file chosen in the save dialog:
+   * the whole export is written in the data folder first, so a failure never leaves a file cut
+   * short at `destination`. Records it as the latest export.
+   */
+  readonly exportTags: (destination: string, appVersion: string) => TagExportResult;
+  /**
+   * Reads a tags export the user chose in an open dialog and keeps it for `planTagImport`,
+   * replacing any other. Throws, saying why, when it cannot be imported.
+   */
+  readonly openTagImport: (filePath: string) => TagImportSource;
   readonly shutdown: () => void;
 }
 

@@ -24,6 +24,41 @@
       }
     </span>
   }
+  @if (current.tagTransfer; as transfer) {
+    <span class="activity">
+      <app-icon class="spin" name="loader" />
+      @switch (transfer.step) {
+        @case ('exporting') {
+          Exporting tags
+        }
+        @case ('reading') {
+          Reading a tags export
+        }
+        @case ('waiting') {
+          Tags import waiting for indexing
+        }
+        @case ('importing') {
+          Importing tags
+        }
+        @default {
+          Matching a tags export
+        }
+      }
+      @if (transfer.total > 0) {
+        @switch (transfer.step) {
+          @case ('reading') {
+            · {{ transfer.done / transfer.total | percent }}
+          }
+          @case ('comparing') {
+            · {{ transfer.done | number }} of {{ transfer.total | number }} files read
+          }
+          @default {
+            · {{ transfer.done | number }} of {{ transfer.total | number }} files
+          }
+        }
+      }
+    </span>
+  }
   @if (current.pendingThumbnails > 0) {
     <span class="faint">{{ current.pendingThumbnails | number }} thumbnails to render</span>
   }
@@ -33,4 +68,24 @@
       {{ current.offlineRoots }} folder{{ current.offlineRoots === 1 ? '' : 's' }} offline
     </span>
   }
+}
+@if (transferNotice(); as notice) {
+  <a class="warning" routerLink="/settings">
+    <app-icon name="alert" />
+    @switch (notice) {
+      @case ('export-failed') {
+        Tags export failed
+      }
+      @case ('export-left-out') {
+        Tags export left tags out
+      }
+      @case ('import-failed') {
+        Tags import failed
+      }
+      @case ('import-left-out') {
+        Tags import left files out
+      }
+    }
+    · see Settings
+  </a>
 }

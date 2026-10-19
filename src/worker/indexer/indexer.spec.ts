@@ -121,6 +121,29 @@ describe('Indexer', () => {
     ]);
   });
 
+  it('is idle only once every task has settled, including tasks queued while waiting', async () => {
+    const first = Promise.withResolvers<ChangeSet>();
+    const second = Promise.withResolvers<ChangeSet>();
+    vi.spyOn(reconciler, 'forget')
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const forgetting = [indexer.forget(add('a.jpg'), true)];
+    let idle = false;
+    const waiting = indexer.whenIdle().then(() => {
+      idle = true;
+    });
+
+    forgetting.push(indexer.forget(add('b.jpg'), true));
+    first.resolve({ changed: [], deleted: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(idle).toBe(false);
+
+    second.resolve({ changed: [], deleted: [] });
+    await waiting;
+    await Promise.all(forgetting);
+    await indexer.whenIdle();
+  });
+
   it('tells the reconciler about files moved to the Trash, then reports them gone', async () => {
     const trashed = add('trashed.jpg');
     const expectDeletion = vi.spyOn(reconciler, 'expectDeletion');

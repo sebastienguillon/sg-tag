@@ -27,19 +27,62 @@
             </span>
           </div>
           @if (confirming() === root.id) {
-            <div class="confirm">
-              <span>
-                Remove from the library?
-                @if (root.taggedCount > 0) {
-                  Tags on {{ root.taggedCount | number }} files will be lost.
+            <div
+              class="confirm"
+              role="alertdialog"
+              aria-label="Confirm"
+              aria-describedby="remove-question"
+              (keydown.escape)="onConfirmEscape($event, root)"
+            >
+              <span id="remove-question">
+                <!-- Remove waits while an export runs: say so first, also once the tags were exported. -->
+                @if (transfer.exportRunning()) {
+                  Exporting tags… Remove the folder once it is done.
+                } @else if (exportedBeforeRemoval(); as exported) {
+                  <!-- Tags the export could not hold are still lost: keep saying so. -->
+                  @if (exported.leftOut === 0) {
+                    Tags exported.
+                  } @else if (exported.files === 0) {
+                    No tags exported: a tags export cannot hold any of them, so removing the folder
+                    loses its tags.
+                  } @else {
+                    Tags exported, except {{ exported.leftOut | number }} that a tags export cannot
+                    hold: removing the folder loses
+                    {{ exported.leftOut === 1 ? 'that one' : 'those' }} on its files.
+                  }
+                  Remove from the library?
+                } @else {
+                  Remove from the library?
+                  @if (root.taggedCount > 0) {
+                    Tags on {{ root.taggedCount | number }} file{{
+                      root.taggedCount === 1 ? '' : 's'
+                    }}
+                    will be lost unless you export them first.
+                    @if (transfer.removingFolder()) {
+                      A library folder is being removed: export the tags once that is done.
+                    }
+                  }
                 }
                 Files on disk are not touched.
               </span>
-              <button type="button" class="button" (click)="confirming.set(null)">Cancel</button>
+              @if (root.taggedCount > 0 && exportedBeforeRemoval() === null) {
+                <button
+                  type="button"
+                  class="button"
+                  [attr.aria-disabled]="transfer.canExport() ? null : 'true'"
+                  (click)="exportBeforeRemoving(root)"
+                >
+                  Export tags…
+                </button>
+              }
+              <button #cancelButton type="button" class="button" (click)="cancelRemove(root)">
+                Cancel
+              </button>
               <button
                 type="button"
                 class="button danger"
                 [disabled]="busy()"
+                [attr.aria-disabled]="transfer.exportRunning() ? 'true' : null"
                 (click)="remove(root)"
               >
                 Remove
@@ -50,8 +93,9 @@
               type="button"
               class="icon-button"
               title="Remove from library"
+              [id]="removeButtonId(root)"
               [attr.aria-label]="`Remove ${root.path}`"
-              (click)="confirming.set(root.id)"
+              (click)="confirmRemove(root)"
             >
               <app-icon name="trash" />
             </button>
@@ -68,6 +112,15 @@
     @if (error(); as message) {
       <p class="error" role="alert">{{ message }}</p>
     }
+  </section>
+
+  <section aria-labelledby="tags-heading">
+    <h2 id="tags-heading">Tags</h2>
+    <app-tag-transfer
+      [dataDir]="diagnostics.value()?.dataDir ?? null"
+      [taggedFiles]="taggedFiles()"
+      [offlineFolders]="offlineFolders()"
+    />
   </section>
 
   <section>
@@ -94,10 +147,6 @@
         </dd>
         <dt>SQLite</dt>
         <dd>{{ info.sqlite }}</dd>
-        <dt>Data folder</dt>
-        <dd>
-          <code>{{ info.dataDir }}</code>
-        </dd>
       </dl>
     }
   </section>

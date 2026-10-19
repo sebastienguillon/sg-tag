@@ -12,7 +12,8 @@ Tag and retrieve the images and videos on your computer, fast. macOS, Windows an
 - Finds identical files (Find duplicates in the toolbar, `is:duplicate`): give the copies the same
   tags, or move the ones you do not need to the Trash.
 - **Files are never modified.** Tags live in the app's own database (see [Tags and files](#tags-and-files)).
-  The only change made on disk is moving a duplicate to the Trash when you ask.
+  The only change made on disk is moving a duplicate to the Trash when you ask. Besides that, the
+  only file it writes is a tags export, where you choose.
 
 ## Requirements
 
@@ -71,8 +72,9 @@ Main process: window, protocols, dialogs, shell ───┘
 Tags are stored only in `library.db` in the app data folder (shown in Settings). Files stay
 byte-identical, which also means:
 
-- **Back up the data folder**: it is the only copy of your tags.
-- Tags are not visible to other apps or machines.
+- **Back up your tags**: they exist only in the data folder. Settings → **Export tags…** saves them
+  to a file you choose; **Import tags…** adds them back, on this computer or another.
+- Tags are not visible to other apps or machines, except through a tags export.
 - Files renamed or moved outside the app, within or between library folders, stay the same file
   (tags, thumbnail): they are recognised by device + inode (same volume) or by a content fingerprint
   (another volume). A tagged file that disappears is kept as missing (`is:missing`) until it is
@@ -87,6 +89,44 @@ byte-identical, which also means:
   those tags are taken back.
 - Folders on drives that are not connected are marked offline; their files and tags are kept, and
   their cached thumbnails stay browsable.
+
+### Exporting and importing tags
+
+A tags export lists every tagged file, including missing ones and those on drives that are not
+connected, with its tags. Tags it cannot hold are left out: longer than 1,024 characters, nested
+more than 64 levels deep, with more than 30 combining marks in a row, or past 1,000 on a file.
+Settings says how many, and a file left with none is not listed. A tags export holds up to 256 MiB,
+about 670,000 tagged files with long paths and near a million with short ones, and lists every
+library folder whatever its path, up to 10,000 of them (tens at the longest paths a computer takes):
+Export tags… refuses a larger one rather than save a file that Import tags… would refuse. Importing
+a tags export shows what it would add before writing anything, only ever adds tags, and can be
+repeated: tags already there are skipped, and the library's own spelling of a tag wins. A file is
+recognised by its content (same size and fingerprint, or same name, size and modification time),
+even if it was renamed, moved, or its library folder has another path on this computer; a file at
+the very same path whose content changed since keeps its tags, as when the app follows it, unless
+most files around it changed too. Files not found are listed with the reason, and their tags are not
+imported: add their folder or connect their drive, then import the same tags export again. Tags
+removed on one computer come back when importing from another that still has them. Importing does
+not look for duplicates; use Find duplicates. If saving an export fails part way, the file is
+removed rather than left cut short, so an earlier export of the same name is lost: the default name
+carries the date to avoid that.
+
+### Tags export format
+
+UTF-8 [JSON Lines](https://jsonlines.org): a header (`format: "sg-tag/tags"`, `version`, `app`,
+`exportedAt`, `platform`, `fingerprint` scheme, `roots`), one line per tagged file (`root`, `rel`,
+`path`, `size`, `mtimeMs`, `fingerprint`, `sha256`, `missing`, `tags`), then
+`{"end":true,"files":N}`. Fields may be added within a version; readers should ignore fields they do
+not know. For example, `jq -c 'select(.tags) | {path, tags}' "SG Tag tags 2026-10-19.jsonl"` lists
+each file with its tags.
+
+```
+{"format":"sg-tag/tags","version":1,"app":"2026.10.0-alpha.1","exportedAt":"2026-10-19T08:30:00.000Z","platform":"darwin","fingerprint":"sha256(size,head64k,tail64k)/32","roots":[{"path":"/Users/seb/Pictures"},{"path":"/Volumes/Archive"}]}
+{"root":0,"rel":"2024/Japan/IMG_1234.JPG","path":"/Users/seb/Pictures/2024/Japan/IMG_1234.JPG","size":4718233,"mtimeMs":1717171717000,"fingerprint":"9f86d081884c7d659a2feaa0c55ad015","sha256":null,"missing":false,"tags":["people/Ana","trips/2024/japan"]}
+{"root":0,"rel":"2023/beach.mov","path":"/Users/seb/Pictures/2023/beach.mov","size":81234567,"mtimeMs":1690000000000,"fingerprint":"0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","missing":true,"tags":["family"]}
+{"root":1,"rel":"Scans/1998/scan-0001.tif","path":"/Volumes/Archive/Scans/1998/scan-0001.tif","size":31457280,"mtimeMs":1012345678000,"fingerprint":null,"sha256":null,"missing":false,"tags":["family/grandparents"]}
+{"end":true,"files":3}
+```
 
 ## Releasing
 

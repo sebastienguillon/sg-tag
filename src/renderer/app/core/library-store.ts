@@ -1,7 +1,7 @@
 import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
 import { createLogger } from '@shared/log';
 import type { FileSummary, IndexStatus, SearchRequest, SearchResult } from '@shared/model';
-import { DESKTOP } from './desktop';
+import { DESKTOP, ipcErrorMessage } from './desktop';
 import { PreferencesStore } from './preferences-store';
 import { WorkerClient } from './worker-client';
 
@@ -181,11 +181,7 @@ export class LibraryStore {
       await this.desktop.trashFile(id);
     } catch (error) {
       log.warn('Cannot move file to the Trash:', error);
-      // Electron prefixes errors thrown in the main process with the channel name.
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(message.replace(/^Error invoking remote method '[^']*': (?:Error: )?/, ''), {
-        cause: error,
-      });
+      throw new Error(ipcErrorMessage(error), { cause: error });
     }
   }
 

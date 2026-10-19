@@ -57,6 +57,7 @@ h2 {
 
 .root {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
@@ -94,11 +95,18 @@ h2 {
   font-size: 12px;
 }
 
+/* Below the folder, aligned with its path: the path stays visible while removing it is confirmed. */
 .confirm {
   display: flex;
+  flex-basis: 100%;
   align-items: center;
   gap: 8px;
+  padding-left: 30px;
   font-size: 12px;
+}
+
+.confirm > span {
+  flex: 1;
 }
 
 .none {

@@ -116,7 +116,7 @@ a {
   font: inherit;
 }
 
-.button:hover:not(:disabled) {
+.button:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--hover);
 }
 
@@ -126,7 +126,7 @@ a {
   color: var(--accent-text);
 }
 
-.button.primary:hover:not(:disabled) {
+.button.primary:hover:not(:disabled, [aria-disabled='true']) {
   background: color-mix(in srgb, var(--accent) 88%, black);
 }
 
@@ -137,6 +137,12 @@ a {
 
 .button:disabled {
   opacity: 0.5;
+}
+
+/* Busy or unavailable, but still focusable: the focus stays where it was. */
+.button[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .icon-button {

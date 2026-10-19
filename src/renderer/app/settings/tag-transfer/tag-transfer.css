@@ -1,0 +1,94 @@
+:host {
+  display: block;
+}
+
+p {
+  margin: 0;
+}
+
+.lead {
+  margin-bottom: 16px;
+  color: var(--text-muted);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  margin: 0 0 8px;
+}
+
+dt {
+  color: var(--text-muted);
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.counts {
+  margin-bottom: 16px;
+  color: var(--text-muted);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.hint {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+[role='status'],
+[role='alert'],
+.activity {
+  margin-top: 12px;
+}
+
+.activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.activity [role='status'] {
+  margin: 0;
+}
+
+.activity .button {
+  margin-left: 8px;
+}
+
+.outcome {
+  display: grid;
+  gap: 6px;
+}
+
+.error + .actions {
+  margin-top: 8px;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

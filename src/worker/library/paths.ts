@@ -2,7 +2,7 @@ import path from 'node:path';
 import { formatOf } from './formats';
 
 /** macOS and Windows volumes are case-insensitive by default. */
-const caseInsensitive = process.platform === 'darwin' || process.platform === 'win32';
+export const caseInsensitive = process.platform === 'darwin' || process.platform === 'win32';
 
 /** Directory names never worth indexing: VCS/tool folders, OS junk, NAS metadata. */
 const IGNORED_DIRECTORIES = new Set([
@@ -90,6 +90,37 @@ export function isWithin(parent: string, child: string): boolean {
 
 export function rootsOverlap(a: string, b: string): boolean {
   return isWithin(a, b) || isWithin(b, a);
+}
+
+/**
+ * `a` and `b` name the same folder on this computer (Unicode NFC; any case on macOS and Windows).
+ */
+export function samePath(a: string, b: string, insensitive = caseInsensitive): boolean {
+  const fold = (value: string): string => {
+    const nfc = value.normalize('NFC');
+    return insensitive ? nfc.toLowerCase() : nfc;
+  };
+  return fold(a) === fold(b);
+}
+
+/**
+ * Segments of an absolute path written on `platform` (`win32`: either separator), empty ones
+ * dropped.
+ */
+export function pathSegments(value: string, platform: string): string[] {
+  return value.split(platform === 'win32' ? /[\\/]/ : '/').filter((segment) => segment !== '');
+}
+
+/**
+ * How many trailing segments `a` and `b` share: 1 for the same name, 2 for the same name and
+ * parent folder… The reconciler's `byLikeness` ranks identical files the same way.
+ */
+export function commonTail(a: readonly string[], b: readonly string[]): number {
+  let same = 0;
+  while (same < a.length && same < b.length && a[a.length - 1 - same] === b[b.length - 1 - same]) {
+    same++;
+  }
+  return same;
 }
 
 /**

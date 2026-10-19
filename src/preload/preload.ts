@@ -3,6 +3,7 @@
  * MessagePorts cannot cross `contextBridge`, so they travel via `window.postMessage`.
  */
 import type { DesktopBridge } from '@shared/desktop-api';
+import type { TagExportResult, TagImportSource } from '@shared/model';
 import { IpcChannel, WORKER_PORT_MESSAGE } from '@shared/desktop-api';
 import { contextBridge, ipcRenderer } from 'electron';
 
@@ -19,6 +20,9 @@ const bridge: DesktopBridge = {
   openFile: (id) => ipcRenderer.invoke(IpcChannel.openFile, id) as Promise<void>,
   revealFile: (id) => ipcRenderer.invoke(IpcChannel.revealFile, id) as Promise<void>,
   trashFile: (id) => ipcRenderer.invoke(IpcChannel.trashFile, id) as Promise<void>,
+  exportTags: () => ipcRenderer.invoke(IpcChannel.exportTags) as Promise<TagExportResult | null>,
+  openTagImport: () =>
+    ipcRenderer.invoke(IpcChannel.openTagImport) as Promise<TagImportSource | null>,
 };
 
 contextBridge.exposeInMainWorld('sgTag', bridge);

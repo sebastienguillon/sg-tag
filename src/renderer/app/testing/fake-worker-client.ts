@@ -7,7 +7,8 @@ type Responder = (...args: never[]) => unknown;
 
 /** Stands in for `WorkerClient`: scripted responses, recorded calls, emitted events. */
 export class FakeWorkerClient {
-  readonly generation = signal(1).asReadonly();
+  private readonly connections = signal(1);
+  readonly generation = this.connections.asReadonly();
   readonly calls: { readonly method: keyof LibraryApi; readonly args: readonly unknown[] }[] = [];
   private readonly responders = new Map<keyof LibraryApi, Responder>();
   private readonly listeners = new Map<keyof LibraryEvents, Set<(payload: never) => void>>();
@@ -54,6 +55,11 @@ export class FakeWorkerClient {
     return () => set.delete(listener);
   }
 
+  /** As when the indexer restarts and a new port arrives. */
+  reconnect(): void {
+    this.connections.update((count) => count + 1);
+  }
+
   emit<K extends keyof LibraryEvents>(name: K, payload: LibraryEvents[K]): void {
     const set = this.listeners.get(name) as Set<(payload: LibraryEvents[K]) => void> | undefined;
     set?.forEach((listener) => {
@@ -69,6 +75,8 @@ export const fakeDesktop: DesktopBridge = {
   openFile: () => Promise.resolve(),
   revealFile: () => Promise.resolve(),
   trashFile: () => Promise.resolve(),
+  exportTags: () => Promise.resolve(null),
+  openTagImport: () => Promise.resolve(null),
 };
 
 /** Lets pending promise callbacks run. */

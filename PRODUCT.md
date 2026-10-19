@@ -28,13 +28,14 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 - **Files are never modified.** Tags live only in the app's own database (`library.db` in the data
   folder): no sidecar files, no metadata written into files. The one change SG Tag makes on disk is
   moving a duplicate to the Trash, when the user asks, after checking that an identical copy stays
-  on disk and giving it the duplicate's tags.
+  on disk and giving it the duplicate's tags. Besides that, the only file SG Tag writes outside its
+  data folder is a tags export, to the place the user chooses in a save dialog.
 - **Speed.** Search filters on every keystroke, and stays instant on large libraries.
-- **Folders as they are.** No import and no managed library: SG Tag indexes existing folders in
-  place, watches them, and adapts to the file system rather than reorganising it. A file renamed or
-  moved outside the app, within or between library folders, stays the same file (same tags and
-  thumbnail); tagged files that disappear are kept as missing; folders on disconnected drives stay
-  browsable as offline.
+- **Folders as they are.** No importing of media and no managed library: SG Tag indexes existing
+  folders in place, watches them, and adapts to the file system rather than reorganising it. A file
+  renamed or moved outside the app, within or between library folders, stays the same file (same
+  tags and thumbnail); tagged files that disappear are kept as missing; folders on disconnected
+  drives stay browsable as offline.
 - **Keyboard-first.** Searching, selecting, tagging and navigating all work without the mouse.
 
 ## Operating Context
@@ -45,8 +46,10 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 - Libraries are ordinary folders, including external drives and network shares that come and go.
 - Video thumbnails and metadata use `ffmpeg`/`ffprobe` when present; macOS and Windows fall back to
   the system thumbnailer without them.
-- The data folder (shown in Settings) holds the only copy of the tags, so users must back it up.
-  Tags are not visible to other apps or machines.
+- The data folder (shown in Settings) holds the only live copy of the tags, so users must back it up
+  or export them: Export tags… saves them to a file the user chooses, and Import tags… adds them
+  back, on this computer or another. Tags are not visible to other apps except through a tags
+  export.
 - Status: alpha (2026.10.0-alpha.1), released through GitHub.
 
 ## Capabilities and Constraints
@@ -57,9 +60,10 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   Finder/Explorer; tag editing for one file or a multi-file selection, showing partial tags as
   `n/total`.
 - Duplicates: files with byte-identical content. Find duplicates checks the whole library on
-  request, and tagging a file checks it; `is:duplicate` lists them side by side. The details panel
-  lists a file's identical copies, can give all copies the same tags, and moves a chosen copy to the
-  Trash. Checks compare size, then a fingerprint, and read whole files only for likely copies.
+  request, and tagging a file checks it (importing tags does not, since it may tag thousands of
+  files at once); `is:duplicate` lists them side by side. The details panel lists a file's identical
+  copies, can give all copies the same tags, and moves a chosen copy to the Trash. Checks compare
+  size, then a fingerprint, and read whole files only for likely copies.
 - Video preview: the details panel plays a video in place, on request, when Chromium decodes it
   (H.264, VP9, AV1, and HEVC where the platform decodes it, in MP4, MOV, MKV or WebM). Guardrail:
   **SG Tag previews; real playback belongs to the system player.** No transcoding and no player
@@ -69,9 +73,17 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   (`untagged`, `tagged`, `missing`, `offline`, `duplicate`), and a leading `-` to exclude.
 - Keyboard: ⌘/Ctrl-F or `/` to search, `T` to tag the selection, ⌘/Ctrl-, for Settings, and grid
   navigation and selection from the keyboard.
-- Settings: library folders (add, remove, file and tagged counts, offline state) and diagnostics.
-- Terminology: _library folders_ (the roots the user adds), _data folder_, _tags_, _selection_,
-  _details panel_, _missing_ and _offline_ files, _indexing_.
+- Settings: library folders (add, remove, file and tagged counts, offline state), tags (data folder,
+  Export tags… and Import tags…), and diagnostics.
+- Tags export and import: a tags export lists every tagged file (missing and offline ones included)
+  with its tags, except tags past its limits (length, depth, combining marks in a row, 1,000 per
+  file), which it leaves out and counts. It holds up to 256 MiB (about 670,000 tagged files) and
+  10,000 library folders (tens at the longest paths), and Export tags… refuses a larger one rather
+  than save a file Import tags… would refuse. Importing it only adds tags, finds files by their
+  content even if they were renamed, moved, or their library folder has another path, and shows what
+  it will add before writing anything.
+- Terminology: _library folders_ (the roots the user adds), _data folder_, _tags_, _tags export_,
+  _selection_, _details panel_, _missing_ and _offline_ files, _indexing_.
 - Heavy work (indexing, watching, thumbnails, database) runs in a separate indexer process, never
   in the interface.
 - License: MIT, for the app's own code. Installers also ship LGPL components (libvips inside

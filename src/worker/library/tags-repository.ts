@@ -15,6 +15,11 @@ export function normalizeTagPath(input: string): string | null {
   return segments.length > 0 ? segments.join('/') : null;
 }
 
+/** A tag path as the database compares it (`COLLATE NOCASE`): only ASCII letters are folded. */
+export function tagKey(path: string): string {
+  return path.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
+}
+
 interface TagRow {
   id: number;
   parent_id: number | null;
@@ -49,12 +54,21 @@ function prepareStatements(db: Db) {
       SELECT t.id, t.path FROM file_tags ft JOIN tags t ON t.id = ft.tag_id
       WHERE ft.file_id = ?
       ORDER BY t.path COLLATE NOCASE`),
+    pathsForFiles: db.prepare<[string], { fileId: number; path: string }>(`
+      SELECT ft.file_id AS fileId, t.path FROM file_tags ft JOIN tags t ON t.id = ft.tag_id
+      WHERE ft.file_id IN (SELECT value FROM json_each(?))
+      ORDER BY ft.file_id, t.path COLLATE NOCASE`),
     forSelection: db.prepare<[string], TagUsage>(`
       SELECT t.id, t.path, COUNT(*) AS fileCount
       FROM file_tags ft JOIN tags t ON t.id = ft.tag_id
       WHERE ft.file_id IN (SELECT value FROM json_each(?))
       GROUP BY t.id
       ORDER BY t.path COLLATE NOCASE`),
+    count: db.prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM tags'),
+    // Walks the primary key: no temporary B-tree for DISTINCT.
+    taggedFileCount: db.prepare<[], { count: number }>(
+      'SELECT COUNT(*) AS count FROM (SELECT DISTINCT file_id FROM file_tags)',
+    ),
     pruneUnused: db.prepare<[]>(`
       DELETE FROM tags
       WHERE NOT EXISTS (SELECT 1 FROM file_tags ft WHERE ft.tag_id = tags.id)
@@ -82,16 +96,21 @@ export class TagsRepository {
     }));
   }
 
-  /** Tags `fileIds` with each of `tagPaths`, creating missing tags (and their ancestors). */
-  addToFiles(fileIds: readonly number[], tagPaths: readonly string[]): void {
+  /**
+   * Tags `fileIds` with each of `tagPaths`, creating missing tags (and their ancestors). Returns
+   * the number of tags added, counted once per file: tags a file already has are not.
+   */
+  addToFiles(fileIds: readonly number[], tagPaths: readonly string[]): number {
     const files = jsonIds(fileIds);
-    this.db.transaction(() => {
+    return this.db.transaction(() => {
+      let added = 0;
       for (const input of tagPaths) {
         const path = normalizeTagPath(input);
         if (path !== null) {
-          this.statements.attach.run(this.ensure(path), files);
+          added += this.statements.attach.run(this.ensure(path), files).changes;
         }
       }
+      return added;
     })();
   }
 
@@ -113,6 +132,29 @@ export class TagsRepository {
 
   forSelection(fileIds: readonly number[]): TagUsage[] {
     return this.statements.forSelection.all(jsonIds(fileIds));
+  }
+
+  /** The tag paths of each of `fileIds`, sorted as `list()` sorts them; untagged files left out. */
+  pathsForFiles(fileIds: readonly number[]): Map<number, string[]> {
+    const paths = new Map<number, string[]>();
+    for (const { fileId, path } of this.statements.pathsForFiles.all(jsonIds(fileIds))) {
+      const list = paths.get(fileId);
+      if (list) {
+        list.push(path);
+      } else {
+        paths.set(fileId, [path]);
+      }
+    }
+    return paths;
+  }
+
+  count(): number {
+    return this.statements.count.get()?.count ?? 0;
+  }
+
+  /** Files, present or missing, that have at least one tag. */
+  taggedFileCount(): number {
+    return this.statements.taggedFileCount.get()?.count ?? 0;
   }
 
   /** Deletes unused leaf tags, repeatedly, so emptied branches disappear too. */

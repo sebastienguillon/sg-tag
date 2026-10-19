@@ -1,0 +1,143 @@
+:host {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+}
+
+h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+h4 {
+  margin: 8px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+p {
+  margin: 0;
+}
+
+.about {
+  color: var(--text-muted);
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.counts {
+  display: grid;
+  gap: 2px;
+  padding-left: 14px;
+}
+
+.counts > li::before {
+  content: '· ';
+  margin-left: -10px;
+}
+
+summary {
+  width: fit-content;
+  color: var(--accent);
+  cursor: default;
+}
+
+.paths {
+  max-height: 180px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  overflow-y: auto;
+  border-radius: var(--radius-s);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* Where a moved file is now, under where it was: long paths stay readable. */
+.current {
+  display: block;
+  padding-left: 2ch;
+}
+
+.reason,
+.more {
+  color: var(--text-muted);
+  font-family: var(--font);
+}
+
+.changed label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* Locked, but still focusable: looks like a busy button. */
+.changed label:has(> input[aria-disabled='true']) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.folders {
+  display: grid;
+  gap: 6px;
+}
+
+.folder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  font-size: 12px;
+}
+
+.path {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.tally {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.warning {
+  color: var(--warning);
+}
+
+.summary {
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.spacer {
+  flex: 1;
+}

@@ -1,3 +1,5 @@
+import type { TagExportResult, TagImportSource } from './model';
+
 /** API the preload script exposes to the renderer as `window.sgTag`. */
 export interface DesktopBridge {
   readonly platform: string;
@@ -8,6 +10,13 @@ export interface DesktopBridge {
   readonly revealFile: (id: number) => Promise<void>;
   /** Moves a file that has an identical copy to the Trash, after giving its tags to the copy. */
   readonly trashFile: (id: number) => Promise<void>;
+  /** Asks where to save, then exports the tags of every tagged file there; `null` if canceled. */
+  readonly exportTags: () => Promise<TagExportResult | null>;
+  /**
+   * Asks for a tags export and reads it, writing nothing; `null` if canceled. Preview it with
+   * `LibraryApi.planTagImport`.
+   */
+  readonly openTagImport: () => Promise<TagImportSource | null>;
 }
 
 export const IpcChannel = {
@@ -17,6 +26,8 @@ export const IpcChannel = {
   openFile: 'shell:open-file',
   revealFile: 'shell:reveal-file',
   trashFile: 'shell:trash-file',
+  exportTags: 'tags:export',
+  openTagImport: 'tags:open-import',
 } as const;
 
 /** `window.postMessage` payload used by the preload script to hand the worker port to the page. */

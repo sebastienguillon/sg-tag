@@ -67,6 +67,39 @@ export interface ContentCandidate extends FingerprintTarget {
   readonly contentHash: string | null;
 }
 
+/** An indexed file, present or missing, that a file of a tags export may be. */
+export interface ImportCandidate extends ContentCandidate {
+  readonly dir: string;
+  readonly name: string;
+  readonly missing: boolean;
+}
+
+/** A tagged file, as written to a tags export. */
+export interface TaggedFileRow {
+  readonly id: number;
+  readonly rootId: number;
+  readonly path: string;
+  readonly dir: string;
+  readonly name: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly fingerprint: string | null;
+  readonly contentHash: string | null;
+  readonly missing: boolean;
+}
+
+/** Where a file was and what it was when a tags import was previewed. */
+export interface FileSnapshot {
+  readonly id: number;
+  readonly rootId: number;
+  readonly dir: string;
+  readonly name: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+  /** Missing from disk. */
+  readonly missing: boolean;
+}
+
 /** Another present file with the same content hash. */
 export interface CopyRecord {
   readonly id: number;
@@ -119,6 +152,12 @@ interface RecordRow {
   content_hash: string | null;
 }
 
+type ImportRow = Omit<ImportCandidate, 'missing'> & { missing: number };
+
+type TaggedRow = Omit<TaggedFileRow, 'missing'> & { missing: number };
+
+type SnapshotRow = Omit<FileSnapshot, 'missing'> & { missing: number };
+
 interface SummaryRow {
   id: number;
   root_id: number;
@@ -146,9 +185,17 @@ const INDEXED_COLUMNS = `
   EXISTS (SELECT 1 FROM file_tags ft WHERE ft.file_id = f.id) AS tagged,
   f.missing_since IS NOT NULL AS missing`;
 
+/** A `LIMIT` of no limit, to SQLite. */
+const NO_LIMIT = -1;
+
 const CANDIDATE_COLUMNS = `
   f.id, f.root_id AS rootId, f.path, f.size, f.mtime_ms AS mtimeMs, f.file_id AS fileId,
   f.fingerprint, f.content_hash AS contentHash`;
+
+const IMPORT_COLUMNS = `
+  f.id, f.root_id AS rootId, f.path, f.dir, f.name, f.size, f.mtime_ms AS mtimeMs,
+  f.file_id AS fileId, f.fingerprint, f.content_hash AS contentHash,
+  f.missing_since IS NOT NULL AS missing`;
 
 /**
  * Rows `a` and `b` are not one file on disk seen twice: a hard link, or a symbolic link indexed as a
@@ -293,6 +340,29 @@ function prepareStatements(db: Db) {
       WHERE f.missing_since IS NULL AND f.id != s.id AND f.content_hash = s.content_hash
         AND ${notSameFile('f', 's')}
       ORDER BY f.path`),
+    // Keyset by size, then id, over `files_size`: each size is searched from the id given, and
+    // walked in id order, so a page reads no more of the index than it returns.
+    withSizes: db.prepare<[string, number, number], ImportRow>(`
+      SELECT ${IMPORT_COLUMNS} FROM files f
+      WHERE f.size > 0 AND f.size IN (SELECT value FROM json_each(?)) AND f.id > ?
+      ORDER BY f.size, f.id
+      LIMIT ?`),
+    // `+` keeps the root out of index selection: `files_name` narrows far more than `files_root`.
+    named: db.prepare<[string, number], ImportRow>(
+      `SELECT ${IMPORT_COLUMNS} FROM files f WHERE f.name = ? COLLATE NOCASE AND +f.root_id = ?`,
+    ),
+    // Keyset by id over the `file_tags` primary key: a file renamed meanwhile keeps its place.
+    // Ordering by `page.file_id` keeps the order of the page, where `f.id` would sort it again.
+    taggedPage: db.prepare<[number, number], TaggedRow>(`
+      SELECT f.id, f.root_id AS rootId, f.path, f.dir, f.name, f.size, f.mtime_ms AS mtimeMs,
+             f.fingerprint, f.content_hash AS contentHash, f.missing_since IS NOT NULL AS missing
+      FROM (SELECT DISTINCT file_id FROM file_tags WHERE file_id > ? ORDER BY file_id LIMIT ?) page
+      JOIN files f ON f.id = page.file_id
+      ORDER BY page.file_id`),
+    snapshots: db.prepare<[string], SnapshotRow>(`
+      SELECT id, root_id AS rootId, dir, name, size, mtime_ms AS mtimeMs,
+             missing_since IS NOT NULL AS missing
+      FROM files WHERE id IN (SELECT value FROM json_each(?))`),
     countWithCopy: db.prepare<[], { count: number }>(
       `SELECT COUNT(*) AS count FROM files f WHERE f.missing_since IS NULL AND ${HAS_COPY}`,
     ),
@@ -499,6 +569,48 @@ export class FilesRepository {
     return this.statements.copies.all(id);
   }
 
+  /**
+   * Present and missing files of one of `sizes`, by size then id; empty files never match by
+   * content: left out. Up to `limit` of them (all by default), after `after`: pass the last file of
+   * a page to get the next.
+   */
+  withSizes(
+    sizes: readonly number[],
+    limit = NO_LIMIT,
+    after: Pick<ImportCandidate, 'size' | 'id'> | null = null,
+  ): ImportCandidate[] {
+    const { withSizes } = this.statements;
+    // The rest of the size the last page ended in, then the sizes above it from their first id. With
+    // `(size, id) > (?, ?)`, SQLite would search each size from its first id: every page would walk
+    // again what the pages before it returned.
+    const rest = after === null ? [] : withSizes.all(jsonIds([after.size]), after.id, limit);
+    const left = limit === NO_LIMIT ? NO_LIMIT : limit - rest.length;
+    const above =
+      left === 0
+        ? []
+        : withSizes.all(
+            jsonIds(after === null ? sizes : sizes.filter((size) => size > after.size)),
+            0,
+            left,
+          );
+    return [...rest, ...above].map(toImportCandidate);
+  }
+
+  /** Present and missing files of root `rootId` named `name`, ASCII letters in any case. */
+  named(name: string, rootId: number): ImportCandidate[] {
+    return this.statements.named.all(name, rootId).map(toImportCandidate);
+  }
+
+  /** Up to `limit` tagged files, present or missing, with an id above `afterId`, by id. */
+  taggedPage(afterId: number, limit: number): TaggedFileRow[] {
+    return this.statements.taggedPage.all(afterId, limit).map(toTaggedFile);
+  }
+
+  /** Where `ids` are and what they are now; ids no longer indexed are left out. */
+  snapshots(ids: readonly number[]): FileSnapshot[] {
+    return this.statements.snapshots.all(jsonIds(ids)).map(toSnapshot);
+  }
+
   /** Present files that have an identical copy. */
   countWithCopy(): number {
     return this.statements.countWithCopy.get()?.count ?? 0;
@@ -676,6 +788,18 @@ function toIndexed(row: IndexedRow): IndexedFile {
     tagged: row.tagged === 1,
     missing: row.missing === 1,
   };
+}
+
+function toImportCandidate(row: ImportRow): ImportCandidate {
+  return { ...row, missing: row.missing === 1 };
+}
+
+function toTaggedFile(row: TaggedRow): TaggedFileRow {
+  return { ...row, missing: row.missing === 1 };
+}
+
+function toSnapshot(row: SnapshotRow): FileSnapshot {
+  return { ...row, missing: row.missing === 1 };
 }
 
 function toSummary(row: SummaryRow, offlineRoots: ReadonlySet<number>): FileSummary {

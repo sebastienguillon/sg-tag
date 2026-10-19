@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { createTestLibrary } from '../testing/test-library';
-import { normalizeTagPath } from './tags-repository';
+import { normalizeTagPath, tagKey } from './tags-repository';
 
 describe('normalizeTagPath', () => {
   it('trims segments, collapses whitespace and drops empty segments', () => {
     expect(normalizeTagPath('  Trips / 2024//New   York  ')).toBe('Trips/2024/New York');
     expect(normalizeTagPath(' / ')).toBeNull();
+  });
+});
+
+describe('tagKey', () => {
+  it('folds ASCII letters only, as `COLLATE NOCASE` does', () => {
+    expect(tagKey('Trips/JAPAN 2024')).toBe('trips/japan 2024');
+    expect(tagKey('Été')).toBe('Été');
+    expect(tagKey('Été')).not.toBe(tagKey('été'));
   });
 });
 
@@ -21,6 +29,37 @@ describe('TagsRepository', () => {
       ['Trips/Japan', 1],
       ['Trips/Japan/Kyoto', 1],
     ]);
+  });
+
+  it('counts the tags it adds, once per file', () => {
+    const { tags, addFile } = createTestLibrary();
+    const a = addFile('a.jpg');
+    const b = addFile('b.jpg');
+    tags.addToFiles([a], ['trips']);
+
+    expect(tags.addToFiles([a, b, 999], ['Trips', 'family/kids', ' / '])).toBe(3);
+    expect(tags.addToFiles([a, b], ['trips', 'family/kids'])).toBe(0);
+  });
+
+  it('lists the tag paths of each file, and counts tags and tagged files', () => {
+    const { files, tags, addFile } = createTestLibrary();
+    const a = addFile('a.jpg');
+    const b = addFile('b.jpg');
+    const gone = addFile('c.jpg', { missingSince: 1 });
+    const untagged = addFile('d.jpg');
+    tags.addToFiles([a], ['zoo', 'Beach', 'animals/cat']);
+    tags.addToFiles([b, gone], ['beach']);
+
+    expect(tags.pathsForFiles([a, b, untagged])).toEqual(
+      new Map([
+        [a, ['animals/cat', 'Beach', 'zoo']],
+        [b, ['Beach']],
+      ]),
+    );
+    expect(tags.count()).toBe(4);
+    expect(tags.taggedFileCount()).toBe(3);
+    files.delete([gone]);
+    expect(tags.taggedFileCount()).toBe(2);
   });
 
   it('reports usage across a selection', () => {
