@@ -16,6 +16,7 @@ export interface WorkerHostOptions {
   readonly entry: string;
   readonly dataDir: string;
   readonly resourcesDir: string;
+  readonly appVersion: string;
 }
 
 /**
@@ -36,7 +37,11 @@ export class WorkerHost {
   start(): void {
     const child = utilityProcess.fork(
       this.options.entry,
-      [`--data-dir=${this.options.dataDir}`, `--resources-dir=${this.options.resourcesDir}`],
+      [
+        `--data-dir=${this.options.dataDir}`,
+        `--resources-dir=${this.options.resourcesDir}`,
+        `--app-version=${this.options.appVersion}`,
+      ],
       { serviceName: 'SG Tag Indexer', stdio: 'inherit' },
     );
     this.child = child;

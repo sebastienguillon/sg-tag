@@ -32,11 +32,20 @@ if (app.requestSingleInstanceLock()) {
 async function main(): Promise<void> {
   await app.whenReady();
 
+  // App menu › About SG Tag (macOS). The version is shown once, not as "version (build)".
+  app.setAboutPanelOptions({
+    applicationName: 'SG Tag',
+    applicationVersion: app.getVersion(),
+    version: '',
+    copyright: 'Copyright © 2026 Sébastien Guillon',
+  });
+
   const dataDir = app.getPath('userData');
   const worker = new WorkerHost({
     entry: path.join(import.meta.dirname, 'worker.js'),
     dataDir,
     resourcesDir: process.resourcesPath,
+    appVersion: app.getVersion(),
   });
   worker.start();
 

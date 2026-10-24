@@ -294,6 +294,7 @@ export interface Settings {
 }
 
 export interface Diagnostics {
+  readonly appVersion: string;
   readonly ffmpeg: string | null;
   readonly ffprobe: string | null;
   readonly sqlite: string;

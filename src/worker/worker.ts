@@ -24,11 +24,13 @@ const { values } = parseArgs({
   options: {
     'data-dir': { type: 'string' },
     'resources-dir': { type: 'string' },
+    'app-version': { type: 'string' },
   },
   strict: false,
 });
 const dataDir = values['data-dir'];
 const resourcesDir = values['resources-dir'];
+const appVersion = values['app-version'];
 if (typeof dataDir !== 'string') {
   throw new Error('The indexer worker requires --data-dir');
 }
@@ -36,6 +38,7 @@ if (typeof dataDir !== 'string') {
 const library = new Library({
   dataDir,
   resourcesDir: typeof resourcesDir === 'string' ? resourcesDir : null,
+  appVersion: typeof appVersion === 'string' ? appVersion : '?',
 });
 
 const { parentPort } = process;
