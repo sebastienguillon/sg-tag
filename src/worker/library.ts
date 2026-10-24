@@ -31,6 +31,8 @@ export interface WorkerConfig {
   readonly dataDir: string;
   /** Electron's `process.resourcesPath`, where bundled binaries live in packaged builds. */
   readonly resourcesDir: string | null;
+  /** The app's version, from `app.getVersion()` in the main process. */
+  readonly appVersion: string;
 }
 
 /** Coalescing windows for change notifications sent to renderers. */
@@ -384,6 +386,7 @@ export class Library {
   private diagnostics(): Diagnostics {
     const sqlite = this.db.prepare<[], string>('SELECT sqlite_version()').pluck().get() ?? '?';
     return {
+      appVersion: this.config.appVersion,
       ffmpeg: this.tools.ffmpeg,
       ffprobe: this.tools.ffprobe,
       sqlite,

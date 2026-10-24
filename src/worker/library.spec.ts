@@ -48,7 +48,7 @@ describe('Library', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'sg-tag-library-'));
-    library = new Library({ dataDir: file('data'), resourcesDir: null });
+    library = new Library({ dataDir: file('data'), resourcesDir: null, appVersion: '0.0.0' });
     stopped = false;
     await library.start();
   });

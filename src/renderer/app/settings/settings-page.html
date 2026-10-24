@@ -127,6 +127,8 @@
     <h2>Diagnostics</h2>
     @if (diagnostics.value(); as info) {
       <dl>
+        <dt>Version</dt>
+        <dd>{{ info.appVersion }}</dd>
         <dt>ffmpeg</dt>
         <dd>
           @if (info.ffmpeg; as path) {

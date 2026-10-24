@@ -79,6 +79,7 @@ describe('SettingsPage', () => {
     roots = [pictures, videos];
     worker.respond('listRoots', () => roots);
     worker.respond('getDiagnostics', () => ({
+      appVersion: '2026.10.0-alpha.3',
       ffmpeg: null,
       ffprobe: null,
       sqlite: '3.50.0',
@@ -108,6 +109,11 @@ describe('SettingsPage', () => {
     expect(text(host.querySelector('app-tag-transfer .counts'))).toBe(
       '1,234 tagged files · 0 tags · Never exported',
     );
+  });
+
+  it('shows the app version first in Diagnostics', () => {
+    expect(text(host.querySelector('section:last-of-type dt'))).toBe('Version');
+    expect(text(host.querySelector('section:last-of-type dd'))).toBe('2026.10.0-alpha.3');
   });
 
   it('offers to export the tags before removing a folder that has some', async () => {
