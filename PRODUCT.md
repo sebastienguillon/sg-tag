@@ -50,7 +50,7 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   or export them: Export tags… saves them to a file the user chooses, and Import tags… adds them
   back, on this computer or another. Tags are not visible to other apps except through a tags
   export.
-- Status: alpha (2026.10.0-alpha.1), released through GitHub.
+- Status: alpha (2026.10.0-alpha.2), released through GitHub.
 
 ## Capabilities and Constraints
 
