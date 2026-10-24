@@ -42,9 +42,13 @@ const entry = (rel: string, content: string, fields: Partial<ImportEntry> = {}):
   ...fields,
 });
 
-/** A tags export of `entries`, made on a Mac whose library folders were `roots`. */
-const exportOf = (entries: readonly ImportEntry[], roots = ['/a/Pictures']): ParsedTagFile => ({
-  header: { app: null, exportedAt: null, platform: 'darwin', roots },
+/** A tags export of `entries`, made on a computer of `platform` whose library folders were `roots`. */
+const exportOf = (
+  entries: readonly ImportEntry[],
+  roots = ['/a/Pictures'],
+  platform = 'darwin',
+): ParsedTagFile => ({
+  header: { app: null, exportedAt: null, platform, roots },
   entries,
   invalid: 0,
   problems: [],
@@ -394,7 +398,8 @@ describe.each([true, false])(
             }
           }
 
-          const result = await match(exportOf(entries, ['/Volumes/Photos/2024']));
+          // Made on this computer's system: paths from another one are never taken as its own.
+          const result = await match(exportOf(entries, ['/Volumes/Photos/2024'], process.platform));
           expect(outcomesOf(result)).toEqual(
             names.map((name) => `samePlace /Volumes/Photos/2024/Trip/${name}.jpg`),
           );
