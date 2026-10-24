@@ -29,6 +29,7 @@
     "start": "pnpm build && electron .",
     "package": "pnpm build && electron-builder --publish never",
     "package:dir": "pnpm build && electron-builder --dir",
+    "icons": "node scripts/build-icons.ts",
     "lint": "eslint --max-warnings 0 .",
     "lint:fix": "eslint --fix .",
     "format": "prettier --write .",

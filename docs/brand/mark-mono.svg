@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="currentColor">
+<title>SG Tag</title>
+<path fill-rule="evenodd" d="M11.4 0H33.25a4.75 4.75 0 0 1 4.75 4.75V33.25a4.75 4.75 0 0 1 -4.75 4.75H11.4L0 19Z M11.4 19a3.04 3.04 0 1 0 6.08 0a3.04 3.04 0 1 0 -6.08 0Z"/>
+<path fill-rule="evenodd" d="M56.4 0H78.25a4.75 4.75 0 0 1 4.75 4.75V33.25a4.75 4.75 0 0 1 -4.75 4.75H56.4L45 19Z M56.4 19a3.04 3.04 0 1 0 6.08 0a3.04 3.04 0 1 0 -6.08 0Z"/>
+<rect x="91.75" y="1.75" width="34.5" height="34.5" rx="4.75" fill="none" stroke="currentColor" stroke-width="3.5"/>
+<path fill-rule="evenodd" d="M11.4 45H33.25a4.75 4.75 0 0 1 4.75 4.75V78.25a4.75 4.75 0 0 1 -4.75 4.75H11.4L0 64Z M11.4 64a3.04 3.04 0 1 0 6.08 0a3.04 3.04 0 1 0 -6.08 0Z"/>
+<rect x="46.75" y="46.75" width="34.5" height="34.5" rx="4.75" fill="none" stroke="currentColor" stroke-width="3.5"/>
+<path fill-rule="evenodd" d="M101.4 45H123.25a4.75 4.75 0 0 1 4.75 4.75V78.25a4.75 4.75 0 0 1 -4.75 4.75H101.4L90 64Z M101.4 64a3.04 3.04 0 1 0 6.08 0a3.04 3.04 0 1 0 -6.08 0Z"/>
+<rect x="1.75" y="91.75" width="34.5" height="34.5" rx="4.75" fill="none" stroke="currentColor" stroke-width="3.5"/>
+<path fill-rule="evenodd" d="M56.4 90H78.25a4.75 4.75 0 0 1 4.75 4.75V123.25a4.75 4.75 0 0 1 -4.75 4.75H56.4L45 109Z M56.4 109a3.04 3.04 0 1 0 6.08 0a3.04 3.04 0 1 0 -6.08 0Z"/>
+<path fill-rule="evenodd" d="M101.4 90H123.25a4.75 4.75 0 0 1 4.75 4.75V123.25a4.75 4.75 0 0 1 -4.75 4.75H101.4L90 109Z M101.4 109a3.04 3.04 0 1 0 6.08 0a3.04 3.04 0 1 0 -6.08 0Z"/>
+</svg>
