@@ -1,7 +1,7 @@
 {
   "name": "sg-tag",
   "productName": "SG Tag",
-  "version": "2026.10.0-alpha.2",
+  "version": "2026.10.0-alpha.3",
   "description": "Tag and retrieve local images and videos, fast.",
   "author": "Sébastien Guillon",
   "license": "MIT",
