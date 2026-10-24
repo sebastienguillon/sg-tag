@@ -22,3 +22,7 @@ coverage/
 Thumbs.db
 *.log
 .env*
+
+# Impeccable design skill: session scratch files; only its shared config belongs in the repo
+/.impeccable/*
+!/.impeccable/config.json
