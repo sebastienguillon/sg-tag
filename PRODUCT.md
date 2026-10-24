@@ -93,7 +93,13 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 ## Brand Commitments
 
 - Name: **SG Tag**. Tagline: "Tag and retrieve local images and videos, fast."
-- No logo or app icon exists yet.
+- App icon: a 3 × 3 grid of thumbnails on an olive-black ground (`#131510`). Tagged ones are
+  shaped like tags, coloured from yellow to teal along the diagonal (`#f4ce23`, `#a8c70b`,
+  `#48c063`, `#0da995`, built in OKLCH around the author's own colour `#a8c70b`); the untagged
+  diagonal between them stays dark (`#2d2f27`). `scripts/build-icons.ts` draws it and writes the
+  installer icons (`pnpm icons`).
+- Wordmark: "SG Tag" in Schibsted Grotesk Bold, outlined. Lockups for dark and light backgrounds and
+  a one-colour mark are in `docs/brand/`.
 
 ## Evidence on Hand
 

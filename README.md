@@ -1,4 +1,9 @@
-# SG Tag
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/lockup-dark.svg" />
+    <img alt="SG Tag" src="docs/brand/lockup-light.svg" height="64" />
+  </picture>
+</h1>
 
 Tag and retrieve the images and videos on your computer, fast. macOS, Windows and Linux.
 
