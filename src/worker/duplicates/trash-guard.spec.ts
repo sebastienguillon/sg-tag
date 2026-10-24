@@ -10,6 +10,9 @@ import { createTestLibrary } from '../testing/test-library';
 import { DuplicateFinder } from './duplicate-finder';
 import { TrashGuard } from './trash-guard';
 
+/** What the system calls the Trash. */
+const TRASH = process.platform === 'win32' ? 'Recycle Bin' : 'Trash';
+
 describe('TrashGuard', () => {
   let dir: string;
   let library: TestLibrary;
@@ -166,7 +169,7 @@ describe('TrashGuard', () => {
     expect(first.status).toBe('fulfilled');
     expect(second).toMatchObject({
       status: 'rejected',
-      reason: new Error('Its identical copy is being moved to the Trash, so this one was kept.'),
+      reason: new Error(`Its identical copy is being moved to the ${TRASH}, so this one was kept.`),
     });
     await expect(guard.prepare(a)).rejects.toThrow('already being moved');
 
