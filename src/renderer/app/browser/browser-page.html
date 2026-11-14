@@ -34,6 +34,17 @@
     <button
       type="button"
       class="icon-button"
+      aria-label="Untagged files only"
+      title="Untagged files: show only files without any tag"
+      [attr.aria-pressed]="untaggedOnly()"
+      [class.active]="untaggedOnly()"
+      (click)="toggleUntagged()"
+    >
+      <app-icon name="tag" />
+    </button>
+    <button
+      type="button"
+      class="icon-button"
       aria-label="Find duplicates"
       title="Find duplicates: files with exactly the same content"
       [disabled]="findingDuplicates()"
@@ -114,6 +125,10 @@
             >
               <app-icon name="copy" /> Find duplicates
             </button>
+          } @else if (query().trim().toLowerCase() === untaggedTerm) {
+            <app-icon class="empty-icon" name="tag" />
+            <h2>Every file has a tag</h2>
+            <p>Files without any tag are listed here.</p>
           } @else {
             <app-icon class="empty-icon" name="search" />
             <h2>No files match “{{ query() }}”</h2>
