@@ -19,6 +19,7 @@ import { Icon } from '../ui/icon/icon';
 import { ResizeHandle } from '../ui/resize-handle/resize-handle';
 import { DetailsPanel } from './details-panel/details-panel';
 import { FileGrid } from './file-grid/file-grid';
+import { hasTerm, toggleTerm } from './query-terms';
 import { SearchBar } from './search-bar/search-bar';
 import { StatusBar } from './status-bar/status-bar';
 
@@ -27,6 +28,7 @@ const log = createLogger('browser');
 type EmptyState = 'loading' | 'no-folders' | 'indexing' | 'no-files' | 'no-match';
 
 const DUPLICATES_QUERY = 'is:duplicate';
+const UNTAGGED_TERM = 'is:untagged';
 
 /** The main view: search, thumbnail grid, details sidebar. */
 @Component({
@@ -59,6 +61,9 @@ export class BrowserPage {
   protected readonly sidebarWidth = this.preferences.sidebarWidth;
   protected readonly addError = signal<string | null>(null);
   protected readonly duplicatesQuery = DUPLICATES_QUERY;
+  protected readonly untaggedTerm = UNTAGGED_TERM;
+  /** The search keeps only files without tags: the Untagged button shows as pressed. */
+  protected readonly untaggedOnly = computed(() => hasTerm(this.query(), UNTAGGED_TERM));
   private readonly checkingDuplicates = signal(false);
   /** A duplicate check runs, started here or from another window. */
   protected readonly findingDuplicates = computed(
@@ -119,6 +124,11 @@ export class BrowserPage {
     this.sidebarOpen.set(true);
     // The panel may only now be created.
     queueMicrotask(() => this.details()?.focusTagInput());
+  }
+
+  /** Adds `is:untagged` to the search, or takes it out; the rest of the query is kept. */
+  protected toggleUntagged(): void {
+    this.query.update((query) => toggleTerm(query, UNTAGGED_TERM));
   }
 
   /** Checks the whole library, then lists the files that have an identical copy. */
