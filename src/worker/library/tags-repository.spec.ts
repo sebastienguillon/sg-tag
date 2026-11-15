@@ -1502,3 +1502,399 @@ describe('TagsRepository', () => {
     }
   });
 });
+
+/** The tags of the library as a tags export says them: each name, aliases and parent tags. */
+function describedTags(
+  tags: TagsRepository,
+): { name: string; aliases: string[]; parents: string[] }[] {
+  const list = tags.list();
+  const names = new Map(list.map((tag) => [tag.id, tag.name]));
+  return list.map(({ name, aliases, parentIds }) => ({
+    name,
+    aliases: [...aliases],
+    parents: parentIds.map((id) => names.get(id) ?? '?'),
+  }));
+}
+
+describe('TagsRepository.applyDefinitions', () => {
+  it('makes the tags described, with their aliases and parent tags', () => {
+    const { tags } = createCheckedLibrary();
+
+    const applied = tags.applyDefinitions(
+      [
+        { name: 'Paris', aliases: ['Paname'], parents: ['France'] },
+        { name: 'France', aliases: [], parents: ['Europe'] },
+      ],
+      false,
+    );
+
+    expect(describedTags(tags)).toEqual([
+      { name: 'Europe', aliases: [], parents: [] },
+      { name: 'France', aliases: [], parents: ['Europe'] },
+      { name: 'Paris', aliases: ['Paname'], parents: ['France'] },
+    ]);
+    const paris = idOf(tags, 'Paris');
+    const france = idOf(tags, 'France');
+    const europe = idOf(tags, 'Europe');
+    expect(applied).toEqual({
+      named: new Map([
+        ['paris', paris],
+        ['paname', paris],
+        ['france', france],
+        ['europe', europe],
+      ]),
+      // The tags described first, then the parent tags that none describes.
+      created: ['Paris', 'France', 'Europe'],
+      aliases: [{ tag: 'Paris', alias: 'Paname' }],
+      links: [
+        { tag: 'Paris', parent: 'France', tagId: paris, parentId: france },
+        { tag: 'France', parent: 'Europe', tagId: france, parentId: europe },
+      ],
+      knownAs: [],
+      skipped: [],
+    });
+    // Made on purpose: no file is needed to keep them.
+    expect(tags.cleanup()).toBe(0);
+  });
+
+  it('tells in a dry run what it would add, and writes nothing', () => {
+    const { tags, db } = createCheckedLibrary();
+    const definitions = [
+      { name: 'Paris', aliases: ['Paname'], parents: ['France'] },
+      { name: 'France', aliases: [], parents: ['Europe'] },
+    ];
+    const before = storedRows(db);
+
+    const dry = tags.applyDefinitions(definitions, true);
+
+    expect(storedRows(db)).toEqual(before);
+    // A tag still to make stands for the key of its name, and has no id.
+    expect(dry).toEqual({
+      named: new Map([
+        ['paris', 'paris'],
+        ['paname', 'paris'],
+        ['france', 'france'],
+        ['europe', 'europe'],
+      ]),
+      created: ['Paris', 'France', 'Europe'],
+      aliases: [{ tag: 'Paris', alias: 'Paname' }],
+      links: [
+        { tag: 'Paris', parent: 'France', tagId: null, parentId: null },
+        { tag: 'France', parent: 'Europe', tagId: null, parentId: null },
+      ],
+      knownAs: [],
+      skipped: [],
+    });
+    // Then does what it said.
+    const applied = tags.applyDefinitions(definitions, false);
+    expect({ ...applied, named: null, links: null }).toEqual({ ...dry, named: null, links: null });
+  });
+
+  it('adds to the tags of the library only what they lack', () => {
+    const { tags, addTag, db } = createCheckedLibrary();
+    addTag('Paris', { aliases: ['Paname'], parents: ['France'] });
+    const before = storedRows(db);
+
+    // What the library has already changes nothing, whatever its letter case.
+    expect(
+      tags.applyDefinitions([{ name: 'PARIS', aliases: ['paname'], parents: ['france'] }], false),
+    ).toMatchObject({ created: [], aliases: [], links: [], knownAs: [], skipped: [] });
+    expect(storedRows(db)).toEqual(before);
+
+    expect(
+      tags.applyDefinitions(
+        [{ name: 'Paris', aliases: ['Paname', 'Lutèce'], parents: ['France', 'Europe'] }],
+        false,
+      ),
+    ).toMatchObject({
+      created: ['Europe'],
+      aliases: [{ tag: 'Paris', alias: 'Lutèce' }],
+      links: [{ tag: 'Paris', parent: 'Europe' }],
+    });
+    expect(describedTags(tags)).toEqual([
+      { name: 'Europe', aliases: [], parents: [] },
+      { name: 'France', aliases: [], parents: [] },
+      { name: 'Paris', aliases: ['Lutèce', 'Paname'], parents: ['Europe', 'France'] },
+    ]);
+  });
+
+  it('takes a tag known here under another name for that tag, which gets the name as an alias', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    addTag('Lutetia', { aliases: ['Paname'] });
+    addTag('Byzantium', { aliases: ['CONSTANTINOPLE'] });
+
+    const applied = tags.applyDefinitions(
+      [
+        // Through an alias it has here: Paris becomes an alias of Lutetia.
+        { name: 'Paris', aliases: ['Paname', 'Lutèce'], parents: [] },
+        // Through its name, an alias here: Byzantium gets nothing more.
+        { name: 'Constantinople', aliases: [], parents: [] },
+      ],
+      false,
+    );
+
+    expect(applied).toMatchObject({
+      created: [],
+      aliases: [
+        { tag: 'Lutetia', alias: 'Paris' },
+        { tag: 'Lutetia', alias: 'Lutèce' },
+      ],
+      knownAs: [
+        { exported: 'Paris', tag: 'Lutetia' },
+        { exported: 'Constantinople', tag: 'Byzantium' },
+      ],
+      skipped: [],
+    });
+    expect(describedTags(tags)).toEqual([
+      { name: 'Byzantium', aliases: ['CONSTANTINOPLE'], parents: [] },
+      { name: 'Lutetia', aliases: ['Lutèce', 'Paname', 'Paris'], parents: [] },
+    ]);
+  });
+
+  it('makes a tag of a name whose aliases are names of several tags here, and says which', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    addTag('Lyon');
+    addTag('Marseille');
+
+    expect(
+      tags.applyDefinitions(
+        [{ name: 'Cities', aliases: ['Lyon', 'Marseille'], parents: [] }],
+        false,
+      ),
+    ).toMatchObject({
+      created: ['Cities'],
+      aliases: [],
+      knownAs: [],
+      skipped: [
+        { kind: 'aliasTaken', tag: 'Cities', alias: 'Lyon', owner: 'Lyon' },
+        { kind: 'aliasTaken', tag: 'Cities', alias: 'Marseille', owner: 'Marseille' },
+      ],
+    });
+  });
+
+  it('leaves out an alias that another tag of the library has, and says which', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    addTag('Paris');
+    addTag('Lyon');
+
+    expect(
+      tags.applyDefinitions([{ name: 'Paris', aliases: ['lyon', 'Paname'], parents: [] }], false),
+    ).toMatchObject({
+      aliases: [{ tag: 'Paris', alias: 'Paname' }],
+      skipped: [{ kind: 'aliasTaken', tag: 'Paris', alias: 'lyon', owner: 'Lyon' }],
+    });
+  });
+
+  it('makes one tag of definitions whose names are one, the first keeping a name two give', () => {
+    const { tags } = createCheckedLibrary();
+
+    const applied = tags.applyDefinitions(
+      [
+        { name: 'Paris', aliases: ['Paname'], parents: [] },
+        { name: 'PANAME', aliases: ['Lutèce'], parents: ['France'] },
+        { name: 'Lyon', aliases: ['paris'], parents: [] },
+      ],
+      false,
+    );
+
+    expect(applied).toMatchObject({
+      created: ['Paris', 'Lyon', 'France'],
+      aliases: [
+        { tag: 'Paris', alias: 'Paname' },
+        { tag: 'Paris', alias: 'Lutèce' },
+      ],
+      links: [{ tag: 'Paris', parent: 'France' }],
+      skipped: [{ kind: 'aliasTaken', tag: 'Lyon', alias: 'paris', owner: 'Paris' }],
+    });
+    expect(applied.named.get('paris')).toBe(idOf(tags, 'Paris'));
+  });
+
+  it('passes over a name that cannot be one, and a parent named twice', () => {
+    const { tags } = createCheckedLibrary();
+
+    expect(
+      tags.applyDefinitions(
+        [
+          { name: 'Paris, France', aliases: [], parents: [] },
+          { name: ' Paris ', aliases: ['', 'a,b', '=x'], parents: ['France', 'FRANCE', '"'] },
+        ],
+        false,
+      ),
+    ).toMatchObject({
+      created: ['Paris', 'France'],
+      aliases: [],
+      links: [{ tag: 'Paris', parent: 'France' }],
+      skipped: [],
+    });
+  });
+
+  it('leaves out every new link that would close a loop, and only those', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    addTag('Paris', { parents: ['France'] });
+
+    const applied = tags.applyDefinitions(
+      [
+        // Through a link of the library.
+        { name: 'France', aliases: [], parents: ['Paris'] },
+        // A loop of new links, and a link into it from outside.
+        { name: 'X', aliases: [], parents: ['Y'] },
+        { name: 'Y', aliases: [], parents: ['Z'] },
+        { name: 'Z', aliases: [], parents: ['X'] },
+        { name: 'W', aliases: [], parents: ['X'] },
+        // The tag itself.
+        { name: 'Q', aliases: [], parents: ['q'] },
+      ],
+      false,
+    );
+
+    expect(applied.links).toEqual([expect.objectContaining({ tag: 'W', parent: 'X' })]);
+    expect(applied.skipped).toEqual([
+      { kind: 'loop', tag: 'Q', parent: 'Q' },
+      { kind: 'loop', tag: 'France', parent: 'Paris' },
+      { kind: 'loop', tag: 'X', parent: 'Y' },
+      { kind: 'loop', tag: 'Y', parent: 'Z' },
+      { kind: 'loop', tag: 'Z', parent: 'X' },
+    ]);
+    expect(describedTags(tags)).toEqual([
+      { name: 'France', aliases: [], parents: [] },
+      { name: 'Paris', aliases: [], parents: ['France'] },
+      { name: 'Q', aliases: [], parents: [] },
+      { name: 'W', aliases: [], parents: ['X'] },
+      { name: 'X', aliases: [], parents: [] },
+      { name: 'Y', aliases: [], parents: [] },
+      { name: 'Z', aliases: [], parents: [] },
+    ]);
+  });
+
+  it('adds a chain of thousands of links listed from the bottom in one pass', () => {
+    const { tags } = createTestLibrary();
+    const count = 8_000;
+    const definitions = Array.from({ length: count }, (_, index) => ({
+      name: `t${index}`,
+      aliases: [],
+      parents: index + 1 < count ? [`t${index + 1}`] : [],
+    }));
+
+    const started = performance.now();
+    const applied = tags.applyDefinitions(definitions, false);
+    const elapsed = performance.now() - started;
+
+    expect(applied.links).toHaveLength(count - 1);
+    expect(applied.skipped).toEqual([]);
+    // Checking each link against those added before it took 30 s.
+    expect(elapsed).toBeLessThan(5_000);
+    // And a link from the top back to the bottom closes a loop through all of them.
+    expect(
+      tags.applyDefinitions([{ name: `t${count - 1}`, aliases: [], parents: ['t0'] }], true)
+        .skipped,
+    ).toEqual([{ kind: 'loop', tag: `t${count - 1}`, parent: 't0' }]);
+  });
+
+  it('stops at the limits on aliases and parent tags, and makes no parent left out', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    const aliases = Array.from({ length: MAX_TAG_ALIASES - 1 }, (_, index) => `a${index}`);
+    const parents = Array.from({ length: MAX_TAG_PARENTS - 1 }, (_, index) => `p${index}`);
+    addTag('Full', { aliases, parents });
+
+    const applied = tags.applyDefinitions(
+      [{ name: 'Full', aliases: ['one more', 'too many'], parents: ['Last', 'Past'] }],
+      false,
+    );
+
+    expect(applied).toMatchObject({
+      created: ['Last'],
+      aliases: [{ tag: 'Full', alias: 'one more' }],
+      links: [{ tag: 'Full', parent: 'Last' }],
+      skipped: [
+        { kind: 'aliasLimit', tag: 'Full', alias: 'too many' },
+        { kind: 'parentLimit', tag: 'Full', parent: 'Past' },
+      ],
+    });
+    expect(tags.resolve(['Past'])).toEqual([null]);
+  });
+
+  it('keeps the tags it describes, and those it puts above another', () => {
+    const { tags, addFile } = createCheckedLibrary();
+    const photo = addFile('photo.jpg');
+    tags.addToFiles([photo], ['Paris', 'France', 'Lyon']);
+
+    tags.applyDefinitions([{ name: 'Paris', aliases: [], parents: ['France'] }], false);
+    tags.removeFromFiles(
+      [photo],
+      tags.forFile(photo).map((tag) => tag.id),
+    );
+
+    // Lyon was made by tagging only: it went with its last file.
+    expect(tags.list().map((tag) => tag.name)).toEqual(['France', 'Paris']);
+  });
+
+  it('reads every tag made or edited on purpose, with its aliases and parent tags', () => {
+    const { tags, addTag, addFile } = createCheckedLibrary();
+    addTag('Paris', { aliases: ['Paname', 'Lutèce'], parents: ['France', 'Europe'] });
+    addTag('Unused');
+    tags.addToFiles([addFile('photo.jpg')], ['t', 'Paris']);
+
+    // Not t, made by tagging a file: a tags export writes it with its file.
+    expect(tags.definitions()).toEqual([
+      { name: 'Europe', aliases: [], parents: [] },
+      { name: 'France', aliases: [], parents: [] },
+      { name: 'Paris', aliases: ['Lutèce', 'Paname'], parents: ['Europe', 'France'] },
+      { name: 'Unused', aliases: [], parents: [] },
+    ]);
+  });
+
+  it('describes in another library the tags as they are in this one', () => {
+    const random = seededRandom(20_261_115);
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+    const { tags } = createCheckedLibrary();
+    const names = Array.from({ length: 40 }, (_, index) => `Tag ${index}`);
+    for (let step = 0; step < 300; step++) {
+      const name = pick(names);
+      const id = tags.resolve([name])[0]?.id ?? editedTag(tags.createTag(name)).id;
+      const roll = random();
+      if (roll < 0.4) {
+        tags.addAlias(id, `${pick(names)} alias ${step % 7}`);
+      } else if (roll < 0.9) {
+        tags.addParent(id, pick(names));
+      } else {
+        tags.renameTag(id, `${pick(names)} renamed`, random() < 0.5);
+      }
+    }
+    const other = createCheckedLibrary();
+
+    const applied = other.tags.applyDefinitions(tags.definitions(), false);
+
+    expect(applied.skipped).toEqual([]);
+    expect(other.tags.definitions()).toEqual(tags.definitions());
+    // And again, it adds nothing.
+    expect(other.tags.applyDefinitions(tags.definitions(), false)).toMatchObject({
+      created: [],
+      aliases: [],
+      links: [],
+    });
+  });
+
+  it('counts the files a search for a parent tag starts to find through a tag put below it', () => {
+    const { tags, addTag, addFile } = createCheckedLibrary();
+    addTag('Paris');
+    addTag('Montmartre', { parents: ['Paris'] });
+    addTag('France');
+    const [a, b, c, gone] = [
+      addFile('a.jpg'),
+      addFile('b.jpg'),
+      addFile('c.jpg'),
+      addFile('gone.jpg', { missingSince: 1 }),
+    ];
+    tags.addToFiles([a, gone], ['Paris']);
+    tags.addToFiles([b], ['Montmartre']);
+    tags.addToFiles([b, c], ['France']);
+    const paris = idOf(tags, 'Paris');
+    const france = idOf(tags, 'France');
+
+    // a, and b through Montmartre, which France finds already; not the missing file.
+    expect(tags.newlyFound(paris, france)).toBe(1);
+    expect(tags.newlyFound(paris, null)).toBe(2);
+    editedTag(tags.addParent(paris, 'France'));
+    expect(tags.newlyFound(paris, france)).toBe(0);
+  });
+});

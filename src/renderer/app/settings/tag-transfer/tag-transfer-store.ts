@@ -33,7 +33,8 @@ export type ImportState =
       readonly source: TagImportSource;
       readonly preview: TagImportPreview;
     }
-  | { readonly step: 'done'; readonly result: TagImportResult }
+  /** `source`: closed since; says whether the tags export listed files at all. */
+  | { readonly step: 'done'; readonly source: TagImportSource; readonly result: TagImportResult }
   /**
    * `source`: still open, so it can be checked again. `stopped`: an import stopped partway, and
    * the tags it added are kept.
@@ -324,7 +325,7 @@ export class TagTransferStore {
         this.includeChanged(),
       );
       if (this.importing() === started) {
-        this.importing.set({ step: 'done', result });
+        this.importing.set({ step: 'done', source, result });
         if (result.skipped > 0) {
           this.notify('import-left-out');
         }

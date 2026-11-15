@@ -39,6 +39,8 @@ export class TagsStore {
   });
 
   readonly tags = computed<readonly Tag[]>(() => this.list.value() ?? []);
+  /** The tags were listed: until then, `tags` is empty whether or not tags exist. */
+  readonly loaded = computed(() => this.list.hasValue());
   /** Each tag with its name as tags and searches compare it: worked out once, not per keystroke. */
   private readonly compared = computed(() =>
     this.tags().map((tag) => ({ tag, key: tagKey(tag.name), fold: tagFold(tag.name) })),

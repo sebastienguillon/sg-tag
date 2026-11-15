@@ -89,6 +89,44 @@ describe('LibraryStore', () => {
     expect([...store.selection()]).toEqual([13]);
   });
 
+  it('searches again when tags are renamed or linked, if the query compares names of tags', async () => {
+    const { store, worker } = setup();
+    let ids = [1, 2];
+    worker.respond('search', () => result(...ids));
+    TestBed.tick();
+    await settle();
+    store.select(0, 'replace');
+    const queries = (): unknown[] =>
+      worker.callsTo('search').map(([request]) => (request as SearchRequest).query);
+    const changeTags = async (query: string): Promise<void> => {
+      store.query.set(query);
+      TestBed.tick();
+      await settle();
+      worker.emit('tagDefinitionsChanged', null);
+      await settle();
+    };
+
+    // France was added above Paris: the files tagged Paris are found by `tag:France` now.
+    ids = [1, 2, 3];
+    await changeTags('tag:France');
+    expect(queries()).toEqual(['', 'tag:France', 'tag:France']);
+    expect(Array.from(store.ids())).toEqual([1, 2, 3]);
+    expect([...store.selection()]).toEqual([1]);
+    await changeTags('-beach type:image');
+    expect(queries().slice(3)).toEqual(['-beach type:image', '-beach type:image']);
+
+    // Nothing these compare depends on the names of tags.
+    await changeTags('is:untagged');
+    await changeTags('IS:Untagged type:video size:>10mb in:"/Volumes/My Photos"');
+    await changeTags('');
+    expect(queries().slice(5)).toEqual([
+      'is:untagged',
+      'IS:Untagged type:video size:>10mb in:"/Volumes/My Photos"',
+      '',
+    ]);
+    expect([...store.selection()]).toEqual([1]);
+  });
+
   it('fetches missing summaries once and refreshes stale ones without dropping them', async () => {
     const { store, worker } = setup();
     let name = 'before.jpg';

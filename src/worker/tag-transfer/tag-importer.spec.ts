@@ -9,11 +9,12 @@ import { crawl, isDirectory, statFiles } from '../indexer/crawler';
 import { fingerprint, FINGERPRINT_SCHEME } from '../indexer/fingerprint';
 import { Reconciler } from '../indexer/reconciler';
 import type { RootRecord } from '../library/roots-repository';
+import type { TagDefinition } from '../library/tags-repository';
 import { SettingsRepository } from '../library/settings-repository';
 import type { TestLibrary } from '../testing/test-library';
 import { createTestLibrary } from '../testing/test-library';
 import { SLICE_BUDGET_MS, yieldNow } from './slices';
-import { endLine, entryLine, headerLine } from './tag-file';
+import { endLine, entryLine, headerLine, tagLine } from './tag-file';
 import { TagExporter } from './tag-exporter';
 import { isLocalPath, TagImporter } from './tag-importer';
 
@@ -32,6 +33,8 @@ const NOTHING = { assignments: 0, files: 0, newTags: 0 };
 const NOT_OPEN = 'This tags export is no longer open: choose it again.';
 const OUT_OF_DATE = 'This preview is out of date: check again.';
 const APPLYING = 'Tags are being imported: wait until that is done.';
+/** What importing a tags export without tag lines adds of tags it describes: nothing. */
+const NOTHING_DEFINED = { created: 0, aliases: 0, links: 0, skipped: 0 };
 
 /** Stands for the fingerprint of a file holding `content`. */
 const printOf = (content: string): string =>
@@ -58,6 +61,8 @@ describe('TagImporter', () => {
   let tagged: (readonly number[])[];
   /** What `onImported` was told, import by import. */
   let imported: (readonly number[])[];
+  /** Calls of `onDefined`. */
+  let defined: number;
   let progress: (TagTransferProgress | null)[];
   let onProgress: () => void;
   let importer: TagImporter;
@@ -95,11 +100,15 @@ describe('TagImporter', () => {
     }).export(destination, APP);
     return destination;
   };
-  /** Writes a tags export of `listed`, made on a computer whose library folders were `roots`. */
+  /**
+   * Writes a tags export of `listed`, made on a computer whose library folders were `roots`, its
+   * tag lines describing `definitions`.
+   */
   const writeExport = async (
     listed: readonly Listed[],
     roots: readonly string[] = ['/library'],
     platform: string = process.platform,
+    definitions: readonly TagDefinition[] = [],
   ): Promise<string> => {
     const lines = listed.map(({ rel, content, tags, root = 0, size = SIZE }) => {
       const slash = rel.lastIndexOf('/');
@@ -128,8 +137,9 @@ describe('TagImporter', () => {
           fingerprint: FINGERPRINT_SCHEME,
           roots,
         }),
+        ...definitions.map(tagLine),
         ...lines,
-        endLine(listed.length),
+        endLine(listed.length, definitions.length),
       ].join(''),
     );
     return exported;
@@ -149,6 +159,7 @@ describe('TagImporter', () => {
     whenIndexed = () => Promise.resolve();
     tagged = [];
     imported = [];
+    defined = 0;
     progress = [];
     onProgress = () => undefined;
     exports = 0;
@@ -164,6 +175,9 @@ describe('TagImporter', () => {
       onImported: (ids) => {
         imported.push(ids);
       },
+      onDefined: () => {
+        defined++;
+      },
       onProgress: () => {
         progress.push(importer.progress);
         onProgress();
@@ -178,6 +192,157 @@ describe('TagImporter', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await rm(dir, { recursive: true, force: true });
+  });
+
+  describe('tag lines', () => {
+    /** What the tags of the library are: names, aliases and the names of their parent tags. */
+    const describedTags = (): { name: string; aliases: readonly string[]; parents: string[] }[] => {
+      const list = library.tags.list();
+      const names = new Map(list.map((tag) => [tag.id, tag.name]));
+      return list.map(({ name, aliases, parentIds }) => ({
+        name,
+        aliases,
+        parents: parentIds.map((id) => names.get(id) ?? '?'),
+      }));
+    };
+
+    it('adds what the tag lines describe before tagging files, as the preview says', async () => {
+      const photo = put('a.jpg', 'a');
+      const exported = await writeExport(
+        // The file line names the tag by one of its aliases.
+        [{ rel: 'a.jpg', content: 'a', tags: ['Paname'] }],
+        ['/library'],
+        process.platform,
+        [{ name: 'Paris', aliases: ['Paname'], parents: ['France'] }],
+      );
+
+      const { source, preview } = await openAndPlan(exported);
+      expect(source).toMatchObject({ files: 1, tags: 1 });
+      expect(library.tags.count()).toBe(0);
+      expect(preview.definitions).toEqual({
+        created: 2,
+        createdItems: ['Paris', 'France'],
+        aliases: 1,
+        aliasItems: [{ tag: 'Paris', alias: 'Paname' }],
+        links: 1,
+        linkItems: [{ tag: 'Paris', parent: 'France', newlyFound: null }],
+        knownAs: 0,
+        knownAsItems: [],
+        skipped: 0,
+        skippedItems: [],
+      });
+      // Paris is counted with the tags the tag lines make, not as a new tag of a file.
+      expect(preview.additions).toEqual({ assignments: 1, files: 1, newTags: 0 });
+
+      expect(await importer.apply(source.token, preview.planId, false)).toEqual({
+        assignments: 1,
+        files: 1,
+        newTags: 0,
+        skipped: 0,
+        notFound: 0,
+        definitions: { created: 2, aliases: 1, links: 1, skipped: 0 },
+      });
+      expect(tagsOf(photo)).toEqual(['Paris']);
+      expect(describedTags()).toEqual([
+        { name: 'France', aliases: [], parents: [] },
+        { name: 'Paris', aliases: ['Paname'], parents: ['France'] },
+      ]);
+      expect(defined).toBe(1);
+      expect(imported).toEqual([[photo]]);
+    });
+
+    it('imports a tags export that only describes tags', async () => {
+      const exported = await writeExport([], ['/library'], process.platform, [
+        { name: 'Unused', aliases: ['Spare'], parents: [] },
+      ]);
+
+      const { source, preview } = await openAndPlan(exported);
+      expect(source).toMatchObject({ files: 0, tags: 1 });
+      expect(preview).toMatchObject({
+        additions: NOTHING,
+        definitions: { created: 1, aliases: 1 },
+      });
+
+      expect(await importer.apply(source.token, preview.planId, false)).toMatchObject({
+        assignments: 0,
+        definitions: { created: 1, aliases: 1, links: 0, skipped: 0 },
+      });
+      expect(describedTags()).toEqual([{ name: 'Unused', aliases: ['Spare'], parents: [] }]);
+      expect(defined).toBe(1);
+      expect(imported).toEqual([]);
+    });
+
+    it('adds nothing, and says nothing changed, when the library describes its tags already', async () => {
+      library.addTag('Paris', { aliases: ['Paname'], parents: ['France'] });
+      const exported = await writeExport([], ['/library'], process.platform, [
+        { name: 'paris', aliases: ['PANAME'], parents: ['France'] },
+        { name: 'France', aliases: [], parents: [] },
+      ]);
+
+      const { source, preview } = await openAndPlan(exported);
+      expect(preview.definitions).toMatchObject({ created: 0, aliases: 0, links: 0, skipped: 0 });
+
+      expect(await importer.apply(source.token, preview.planId, false)).toMatchObject({
+        definitions: { created: 0, aliases: 0, links: 0, skipped: 0 },
+      });
+      expect(defined).toBe(0);
+    });
+
+    it('compares a file by tag through the names that the tag lines give the tag', async () => {
+      const photo = put('a.jpg', 'a');
+      library.addTag('Lutetia', { aliases: ['Paname'] });
+      library.tags.addToFiles([photo], ['Lutetia']);
+      const exported = await writeExport(
+        [{ rel: 'a.jpg', content: 'a', tags: ['Paris'] }],
+        ['/library'],
+        process.platform,
+        [{ name: 'Paris', aliases: ['Paname'], parents: [] }],
+      );
+
+      const { preview } = await openAndPlan(exported);
+      // Paris is Lutetia here, which the file has.
+      expect(preview.additions).toEqual(NOTHING);
+      expect(preview.definitions).toMatchObject({
+        aliasItems: [{ tag: 'Lutetia', alias: 'Paris' }],
+        knownAsItems: [{ exported: 'Paris', tag: 'Lutetia' }],
+      });
+    });
+
+    it('says for a link it adds how many files a search for the parent tag starts to find', async () => {
+      const photo = put('a.jpg', 'a');
+      library.tags.addToFiles([photo], ['Paris']);
+      library.addTag('France');
+      const exported = await writeExport([], ['/library'], process.platform, [
+        { name: 'Paris', aliases: [], parents: ['France', 'Europe'] },
+      ]);
+
+      const { preview } = await openAndPlan(exported);
+      expect(preview.definitions.linkItems).toEqual([
+        { tag: 'Paris', parent: 'France', newlyFound: 1 },
+        { tag: 'Paris', parent: 'Europe', newlyFound: 1 },
+      ]);
+    });
+
+    it('lists what it leaves out, and why', async () => {
+      library.addTag('Paris', { parents: ['France'] });
+      library.addTag('Lyon');
+      const exported = await writeExport([], ['/library'], process.platform, [
+        { name: 'France', aliases: [], parents: ['Paris'] },
+        { name: 'Paris', aliases: ['Lyon'], parents: [] },
+      ]);
+
+      const { source, preview } = await openAndPlan(exported);
+      expect(preview.definitions).toMatchObject({
+        skipped: 2,
+        skippedItems: [
+          { kind: 'aliasTaken', tag: 'Paris', alias: 'Lyon', owner: 'Lyon' },
+          { kind: 'loop', tag: 'France', parent: 'Paris' },
+        ],
+      });
+      expect(await importer.apply(source.token, preview.planId, false)).toMatchObject({
+        definitions: { created: 0, aliases: 0, links: 0, skipped: 2 },
+      });
+    });
   });
 
   it('adds nothing when a fresh export of this library is imported into it', async () => {
@@ -223,6 +388,7 @@ describe('TagImporter', () => {
       ...NOTHING,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(ids.map((each) => tagsOf(each))).toEqual(before);
     expect(imported).toEqual([]);
@@ -294,7 +460,14 @@ describe('TagImporter', () => {
     );
 
     const result = await importer.apply(source.token, preview.planId, true);
-    expect(result).toEqual({ assignments: 5, files: 4, newTags: 4, skipped: 0, notFound: 1 });
+    expect(result).toEqual({
+      assignments: 5,
+      files: 4,
+      newTags: 4,
+      skipped: 0,
+      notFound: 1,
+      definitions: NOTHING_DEFINED,
+    });
     for (const [rel, here] of Object.entries(inB)) {
       expect(tagsOf(idIn(library, `b/Photos/${here}`))).toEqual(tagsOf(inA(rel), a));
     }
@@ -315,6 +488,7 @@ describe('TagImporter', () => {
       newTags: 2,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
 
     const again = await openAndPlan(exported);
@@ -324,6 +498,7 @@ describe('TagImporter', () => {
       ...NOTHING,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(tagsOf(a)).toEqual(['Ana', 'trips']);
     expect(tagsOf(b)).toEqual(['trips']);
@@ -343,7 +518,14 @@ describe('TagImporter', () => {
     // Japan, ete and Ramen: trips and Été exist.
     expect(preview.additions).toEqual({ assignments: 6, files: 2, newTags: 3 });
     const result = await importer.apply(source.token, preview.planId, true);
-    expect(result).toEqual({ assignments: 6, files: 2, newTags: 3, skipped: 0, notFound: 0 });
+    expect(result).toEqual({
+      assignments: 6,
+      files: 2,
+      newTags: 3,
+      skipped: 0,
+      notFound: 0,
+      definitions: NOTHING_DEFINED,
+    });
     expect(tagsOf(a)).toEqual(['Été', 'Japan', 'trips']);
     expect(tagsOf(b)).toEqual(['ete', 'Été', 'Japan', 'Ramen', 'trips']);
     expect(library.tags.list().map((tag) => tag.name)).toEqual([
@@ -380,6 +562,7 @@ describe('TagImporter', () => {
       newTags: 0,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(tagsOf(a)).toEqual(['Paris']);
     expect(tagsOf(b)).toEqual(['Paris']);
@@ -407,7 +590,14 @@ describe('TagImporter', () => {
     expect(source.tags).toBe(3);
     expect(preview.additions).toEqual({ assignments: 4, files: 2, newTags: 3 });
     const result = await importer.apply(source.token, preview.planId, true);
-    expect(result).toEqual({ assignments: 4, files: 2, newTags: 3, skipped: 0, notFound: 0 });
+    expect(result).toEqual({
+      assignments: 4,
+      files: 2,
+      newTags: 3,
+      skipped: 0,
+      notFound: 0,
+      definitions: NOTHING_DEFINED,
+    });
     // Spelled as the tags export first spells it.
     expect(tagsOf(a)).toEqual(['Ky\u00ADoto']);
     expect(tagsOf(b)).toEqual([england, scotland, 'Ky\u00ADoto']);
@@ -429,7 +619,14 @@ describe('TagImporter', () => {
     // trips/2024/Japan, AC/DC and trips/2024, each a tag of its own.
     expect(preview.additions).toEqual({ assignments: 4, files: 2, newTags: 3 });
     const result = await importer.apply(source.token, preview.planId, true);
-    expect(result).toEqual({ assignments: 4, files: 2, newTags: 3, skipped: 0, notFound: 0 });
+    expect(result).toEqual({
+      assignments: 4,
+      files: 2,
+      newTags: 3,
+      skipped: 0,
+      notFound: 0,
+      definitions: NOTHING_DEFINED,
+    });
     expect(tagsOf(a)).toEqual(['AC/DC', 'trips', 'trips/2024/Japan']);
     // It did not have `trips`, and does not get it.
     expect(tagsOf(b)).toEqual(['trips/2024', 'trips/2024/Japan']);
@@ -464,6 +661,7 @@ describe('TagImporter', () => {
       ...preview.additionsWithChanged,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(library.tags.count() - before).toBe(4);
   });
@@ -485,6 +683,7 @@ describe('TagImporter', () => {
       ...NOTHING,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(tagsOf(a)).toEqual(['Paris']);
     expect(library.tags.list()).toEqual([
@@ -516,6 +715,7 @@ describe('TagImporter', () => {
       ...preview.additionsWithChanged,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(tagsOf(a)).toEqual(['Paris', 'Rome']);
     expect(tagsOf(b)).toEqual(['Paris']);
@@ -549,6 +749,7 @@ describe('TagImporter', () => {
       newTags: 0,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(tagsOf(a)).toEqual(['Paris']);
     expect(tagsOf(b)).toEqual(['Paris', 'Roma']);
@@ -579,6 +780,7 @@ describe('TagImporter', () => {
       newTags: 3,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     // Paris too, and not only the tag made of the name that was its alias.
     expect(tagsOf(a)).toEqual(['Paname', 'Paris']);
@@ -784,6 +986,7 @@ describe('TagImporter', () => {
       newTags: 1,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(tagsOf(b)).toEqual([]);
 
@@ -859,7 +1062,14 @@ describe('TagImporter', () => {
     library.tags.addToFiles([meanwhile], ['t']);
 
     const result = await importer.apply(source.token, preview.planId, true);
-    expect(result).toEqual({ assignments: 1, files: 1, newTags: 0, skipped: 3, notFound: 0 });
+    expect(result).toEqual({
+      assignments: 1,
+      files: 1,
+      newTags: 0,
+      skipped: 3,
+      notFound: 0,
+      definitions: NOTHING_DEFINED,
+    });
     expect(imported).toEqual([[kept, meanwhile]]);
     expect(tagsOf(kept)).toEqual(['t']);
     expect(tagsOf(edited)).toEqual([]);
@@ -898,7 +1108,14 @@ describe('TagImporter', () => {
     library.files.markMissing(deleted, MTIME);
 
     const result = await importer.apply(source.token, preview.planId, true);
-    expect(result).toEqual({ assignments: 3, files: 3, newTags: 3, skipped: 2, notFound: 0 });
+    expect(result).toEqual({
+      assignments: 3,
+      files: 3,
+      newTags: 3,
+      skipped: 2,
+      notFound: 0,
+      definitions: NOTHING_DEFINED,
+    });
     expect(tagsOf(kept)).toEqual(['kept']);
     expect(tagsOf(gone)).toEqual(['gone']);
     expect(tagsOf(edited)).toEqual([]);
@@ -916,6 +1133,7 @@ describe('TagImporter', () => {
       ...NOTHING,
       skipped: 1,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(library.tags.list()).toEqual([]);
     expect(tagged).toEqual([]);
@@ -1177,6 +1395,7 @@ describe('TagImporter', () => {
       newTags: 0,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(library.tags.taggedFileCount()).toBe(1_001);
     await expect(importer.plan(source.token)).rejects.toThrow(NOT_OPEN);
@@ -1200,6 +1419,7 @@ describe('TagImporter', () => {
       newTags: 1,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
     expect(tagged).toEqual([ids.slice(0, 1_000), ids.slice(1_000)]);
     expect(imported).toEqual([ids]);
