@@ -751,6 +751,60 @@ describe('Library', () => {
     expect(await found('tag:Trips')).toEqual([]);
   });
 
+  it('tags a file as its classification catalogue says, the subcategory below the category', async () => {
+    await addTaggedFolders();
+    const { handlers, hostHandlers } = library;
+    const [a, b] = (await allFiles()) as [number, number, number];
+    const catalogue = file('catalogue.csv');
+    await writeFile(
+      catalogue,
+      [
+        'Source path,Suggested category,Subcategory,Format and secondary tags',
+        `"${file('Pictures', 'a.jpg')}",Animals,Wildlife,phone video;selfie`,
+      ].join('\n'),
+    );
+    const sent = listen();
+
+    expect(await hostHandlers.openCatalogue(catalogue)).toMatchObject({ rows: 1, error: null });
+    expect(await handlers.getCatalogue()).toMatchObject({ path: catalogue, rows: 1 });
+    expect(sent()).toEqual(['catalogueChanged']);
+    expect(await handlers.getCatalogueEntry(b)).toBeNull();
+    expect((await handlers.getCatalogueEntry(a))?.suggestions).toEqual([
+      { name: 'Wildlife', kind: 'subject', added: false },
+      { name: 'phone video', kind: 'format', added: false },
+      { name: 'selfie', kind: 'format', added: false },
+    ]);
+
+    // Only the tags it suggests for the file.
+    const outcomes = await handlers.addCatalogueTags(a, ['Wildlife', 'selfie', 'Elsewhere']);
+    expect(outcomes.map((outcome) => [outcome.name, outcome.status])).toEqual([
+      ['Wildlife', 'added'],
+      ['selfie', 'added'],
+    ]);
+    expect(sent()).toEqual(DEFINITIONS_CHANGED);
+    expect(await found('tag:Animals')).toEqual(['a.jpg']);
+    expect((await tagsByFile())['a.jpg']).toEqual(['selfie', 't', 'Wildlife']);
+    expect((await handlers.getCatalogueEntry(a))?.suggestions.map((each) => each.added)).toEqual([
+      true,
+      false,
+      true,
+    ]);
+
+    // The category is already above it: the definition of no tag changes.
+    expect(await handlers.addCatalogueTags(a, ['Wildlife', 'phone video'])).toMatchObject([
+      { name: 'Wildlife', status: 'present' },
+      { name: 'phone video', status: 'added' },
+    ]);
+    expect(sent()).toEqual(['tagsChanged']);
+
+    await handlers.forgetCatalogue();
+    expect(sent()).toEqual(['catalogueChanged']);
+    expect(await handlers.getCatalogue()).toBeNull();
+    expect(await handlers.getCatalogueEntry(a)).toBeNull();
+    expect(await handlers.addCatalogueTags(a, ['Wildlife'])).toEqual([]);
+    expect(sent()).toEqual([]);
+  });
+
   it('lets through, as it is, the refusal of a library made by a newer version', async () => {
     await library.stop();
     stopped = true;

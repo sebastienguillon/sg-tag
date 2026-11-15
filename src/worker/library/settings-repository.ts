@@ -5,6 +5,7 @@ import type { Db } from '../database/database';
 const SORT_FIELDS: readonly SortField[] = ['modified', 'name', 'size'];
 const SORT_DIRECTIONS: readonly SortDirection[] = ['asc', 'desc'];
 const LAST_TAG_EXPORT = 'lastTagExport';
+const CATALOGUE_FILE = 'catalogueFile';
 
 function prepareStatements(db: Db) {
   return {
@@ -13,6 +14,7 @@ function prepareStatements(db: Db) {
     upsert: db.prepare<[string, string]>(
       'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
     ),
+    remove: db.prepare<[string]>('DELETE FROM settings WHERE key = ?'),
   };
 }
 
@@ -58,6 +60,25 @@ export class SettingsRepository {
   recordTagExport(record: TagExportRecord): void {
     const { at, path, files } = record;
     this.statements.upsert.run(LAST_TAG_EXPORT, JSON.stringify({ at, path, files }));
+  }
+
+  /**
+   * The classification catalogue chosen, by its path, if any; `update()` never writes it (its key
+   * is not a setting).
+   */
+  catalogueFile(): string | null {
+    const row = this.statements.value.get(CATALOGUE_FILE);
+    const value = row ? (JSON.parse(row.value) as unknown) : null;
+    return typeof value === 'string' && value !== '' ? value : null;
+  }
+
+  /** Remembers the classification catalogue chosen; `null` forgets it. */
+  recordCatalogueFile(path: string | null): void {
+    if (path === null) {
+      this.statements.remove.run(CATALOGUE_FILE);
+    } else {
+      this.statements.upsert.run(CATALOGUE_FILE, JSON.stringify(path));
+    }
   }
 }
 

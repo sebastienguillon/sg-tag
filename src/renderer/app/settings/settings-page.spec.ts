@@ -108,6 +108,7 @@ describe('SettingsPage', () => {
     lastExport = null;
     worker.respond('getLastTagExport', () => lastExport);
     worker.respond('removeRoot', () => undefined);
+    worker.respond('getCatalogue', () => null);
     exportTags = () => Promise.resolve(exported);
     TestBed.configureTestingModule({
       providers: [
@@ -119,10 +120,11 @@ describe('SettingsPage', () => {
     await mount();
   });
 
-  it('puts the Tags section between Library folders and Diagnostics', () => {
+  it('puts the Tags section between Library folders and Diagnostics, the catalogue after it', () => {
     expect([...host.querySelectorAll('h2')].map((heading) => text(heading))).toEqual([
       'Library folders',
       'Tags',
+      'Classification catalogue',
       'Diagnostics',
     ]);
     expect(text(host.querySelector('app-tag-transfer .counts'))).toBe(

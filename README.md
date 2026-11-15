@@ -153,6 +153,27 @@ deleted once read, so TagStudio may stay open and its library is never changed.
   over as ordinary tags), fields, and the built-in tags Archived and Favorite when no file has
   them, and Meta Tags.
 
+### Tags from a classification catalogue (experimental)
+
+The `media-classification` skill writes a catalogue of the images and videos it classifies: a CSV
+file with one row per file. Choose it in Settings → **Classification catalogue**; SG Tag remembers
+it, reads it again when it changes, and never writes it. The details panel then shows, for one
+selected file, what the catalogue says of it (category and subcategory, confidence, topic, visible
+content, review notes) and suggests its tags: each is added with its own button, or all at once
+with **Add all**.
+
+- The subcategory is the tag a file gets, with its category as its parent tag, so `tag:<category>`
+  finds the files of all its subcategories. Format tags (`Format and secondary tags`) are plain tags.
+- Labels come in as the catalogue writes them. Rename a tag with "Keep … as an alias", or merge two,
+  and the catalogue's label still names it. A label a tag name cannot hold (a comma, a double
+  quote, a leading `=`) is rewritten, as the TagStudio import does.
+- A file is the one at the catalogue's `Source path`, or, once moved, the one file in the library
+  folders with its name, size and date (`Original size bytes`, `Original mtime nanoseconds`). A file
+  found at its path with another size or date is said to have changed since it was classified.
+- Required columns: `Source path`, `Suggested category`, `Subcategory`. Read when present: the two
+  above, `Format and secondary tags`, `Confidence in category`, `Needs further review`, `Review
+status`, `Topic detail`, `Visible content` and `Review notes`. UTF-8, up to 256 MiB.
+
 ### Tags export format
 
 UTF-8 [JSON Lines](https://jsonlines.org): a header (`format: "sg-tag/tags"`, `version: 2`, `app`,

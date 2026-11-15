@@ -1,0 +1,50 @@
+@let status = store.status.hasValue() ? store.status.value() : null;
+
+<p class="lead">
+  Experimental. The <code>media-classification</code> skill writes a catalogue of the images and
+  videos it classifies, a CSV file. Choose it, and the details panel shows what it says of the
+  selected file and suggests its tags. The catalogue is only read.
+</p>
+
+@if (status) {
+  <dl>
+    <dt>Catalogue</dt>
+    <dd>
+      <code>{{ status.path }}</code>
+    </dd>
+  </dl>
+  @if (status.error; as error) {
+    <p class="warning" role="status">{{ error }}</p>
+  } @else {
+    <p class="counts">
+      {{ status.rows | number }} file{{ status.rows === 1 ? '' : 's' }} classified
+      @if (status.invalid > 0) {
+        · {{ status.invalid | number }} row{{ status.invalid === 1 ? '' : 's' }} could not be read
+      }
+    </p>
+    @if (status.problems.length > 0) {
+      <ul class="problems">
+        @for (problem of status.problems; track $index) {
+          <li>{{ problem }}</li>
+        }
+      </ul>
+    }
+  }
+}
+
+<div class="actions">
+  <button
+    type="button"
+    class="button"
+    [attr.aria-disabled]="store.choosing() ? 'true' : null"
+    (click)="choose()"
+  >
+    {{ status ? 'Choose another…' : 'Choose catalogue…' }}
+  </button>
+  @if (status) {
+    <button type="button" class="button" (click)="forget()">Stop using it</button>
+  }
+</div>
+@if (store.error(); as message) {
+  <p class="error" role="alert">{{ message }}</p>
+}

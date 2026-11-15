@@ -57,4 +57,19 @@ describe('SettingsRepository', () => {
       expect(settings.lastTagExport()).toBeNull();
     }
   });
+
+  it('remembers the classification catalogue chosen until it is forgotten', () => {
+    const { db } = createTestLibrary();
+    const settings = new SettingsRepository(db);
+    expect(settings.catalogueFile()).toBeNull();
+
+    settings.recordCatalogueFile('/Users/seb/media_catalog.csv');
+    expect(settings.catalogueFile()).toBe('/Users/seb/media_catalog.csv');
+    expect(settings.get()).toEqual(DEFAULT_SETTINGS);
+    settings.update({ catalogueFile: '/elsewhere.csv' } as Partial<Settings>);
+    expect(new SettingsRepository(db).catalogueFile()).toBe('/Users/seb/media_catalog.csv');
+
+    settings.recordCatalogueFile(null);
+    expect(settings.catalogueFile()).toBeNull();
+  });
 });

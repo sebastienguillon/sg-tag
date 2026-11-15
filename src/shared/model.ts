@@ -543,6 +543,56 @@ export interface MediaToolInfo {
   readonly bundled: boolean;
 }
 
+/** The classification catalogue chosen in Settings, as the indexer last read it. */
+export interface CatalogueStatus {
+  /** The file chosen. */
+  readonly path: string;
+  /** Rows read: one per file it classifies. 0 while it cannot be read. */
+  readonly rows: number;
+  /** Rows that could not be read: left out. */
+  readonly invalid: number;
+  /**
+   * Why, for the first few (`Row 12: no source path.`), counting rows as a spreadsheet shows them,
+   * the header being row 1; never quotes the file.
+   */
+  readonly problems: readonly string[];
+  /** Why it cannot be read now (moved, deleted, changed into something else); `null` when it can. */
+  readonly error: string | null;
+}
+
+/** A tag that the classification catalogue suggests for a file. */
+export interface CatalogueSuggestion {
+  /** The tag's name, as the catalogue writes it once made a valid name. */
+  readonly name: string;
+  /** `subject`: the subcategory, below its category; `format`: a format tag. */
+  readonly kind: 'subject' | 'format';
+  /** The file has the tag that this is the name or an alias of. */
+  readonly added: boolean;
+}
+
+/** What the classification catalogue says of one file. */
+export interface CatalogueEntry {
+  readonly category: string;
+  readonly subcategory: string;
+  /** As the catalogue writes it (`high`, `medium`, `low`); `null` when it says nothing. */
+  readonly confidence: string | null;
+  /** Marked for further review. */
+  readonly flagged: boolean;
+  readonly reviewStatus: string | null;
+  readonly topic: string | null;
+  readonly visibleContent: string | null;
+  readonly reviewNotes: string | null;
+  /**
+   * How the file was found: at the path the catalogue lists (`samePlace`), there with another size
+   * or date (`changed`), or elsewhere by its name, size and date (`moved`).
+   */
+  readonly found: 'samePlace' | 'changed' | 'moved';
+  /** Where the file was when it was classified, as the catalogue writes it. */
+  readonly classifiedPath: string;
+  /** The subcategory first, then the format tags. */
+  readonly suggestions: readonly CatalogueSuggestion[];
+}
+
 export interface Diagnostics {
   readonly appVersion: string;
   /** `null` when not found. */

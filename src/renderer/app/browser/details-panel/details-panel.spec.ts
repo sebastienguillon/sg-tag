@@ -2,6 +2,7 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed } from '@angular/core/testing';
 import type { DesktopBridge } from '@shared/desktop-api';
 import type {
+  CatalogueEntry,
   FileCopy,
   FileDetails,
   Tag,
@@ -135,6 +136,7 @@ describe('DetailsPanel', () => {
     worker.respond('search', () => ({ ids: Int32Array.from([photo.id]), elapsedMs: 0 }));
     worker.respond('listTags', () => []);
     worker.respond('getDetails', () => photo);
+    worker.respond('getCatalogueEntry', () => null);
     trashed = [];
     trashFile = (id) => {
       trashed.push(id);
@@ -175,6 +177,33 @@ describe('DetailsPanel', () => {
     // Quoted, or the search would read two terms.
     chip('New York')?.click();
     expect(store.query()).toBe('tag:"New York"');
+  });
+
+  it('shows what the classification catalogue says of one selected file, and of no selection of several', async () => {
+    worker.respond('getCatalogueEntry', (): CatalogueEntry => ({
+      category: 'Animals',
+      subcategory: 'Wildlife',
+      confidence: 'high',
+      flagged: false,
+      reviewStatus: null,
+      topic: null,
+      visibleContent: null,
+      reviewNotes: null,
+      found: 'samePlace',
+      classifiedPath: photo.path,
+      suggestions: [{ name: 'Wildlife', kind: 'subject', added: false }],
+    }));
+    worker.respond('getSelectionTags', () => []);
+    worker.emit('catalogueChanged', null);
+    await render();
+    expect(host.querySelector('app-classification .subject')?.textContent.trim()).toBe(
+      'Animals › Wildlife',
+    );
+    expect(worker.callsTo('getCatalogueEntry').at(-1)).toEqual([photo.id]);
+
+    TestBed.inject(LibraryStore).selection.set(new Set([photo.id, 4]));
+    await render();
+    expect(host.querySelector('app-classification')).toBeNull();
   });
 
   it('takes a tag from the file with the button of its chip', async () => {
