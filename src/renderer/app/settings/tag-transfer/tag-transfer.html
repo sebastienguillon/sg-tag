@@ -3,6 +3,7 @@
 @let importState = store.importState();
 @let progress = store.progress();
 @let tags = tagCount();
+@let nothingToExport = noTag();
 @let removing = store.removingFolder();
 
 <p class="lead">
@@ -39,8 +40,8 @@
   <button
     type="button"
     class="button"
-    [attr.aria-disabled]="!store.canExport() || tagged === 0 ? 'true' : null"
-    [attr.aria-describedby]="tagged === 0 || removing ? hintId : null"
+    [attr.aria-disabled]="!store.canExport() || nothingToExport ? 'true' : null"
+    [attr.aria-describedby]="nothingToExport || removing ? hintId : null"
     (click)="export()"
   >
     Export tags…
@@ -55,8 +56,8 @@
     Import tags…
   </button>
 </div>
-@if (tagged === 0) {
-  <p class="hint" [id]="hintId">Nothing to export yet: no file is tagged.</p>
+@if (nothingToExport) {
+  <p class="hint" [id]="hintId">Nothing to export yet: there is no tag.</p>
 } @else if (removing) {
   <p class="hint" [id]="hintId">
     A library folder is being removed: export the tags once that is done.
@@ -77,12 +78,25 @@
   @let exported = exportState.result;
   <div class="outcome" role="status">
     <p>
-      Exported the tags of {{ exported.files | number }} file{{ exported.files === 1 ? '' : 's' }}
-      @if (exported.missing > 0) {
-        @if (exported.files === 1) {
-          (missing from disk)
-        } @else {
-          ({{ exported.missing | number }} of them missing from disk)
+      @if (exported.files === 0 && exported.definitions > 0) {
+        <!-- Tags made on purpose, that no file has. -->
+        Exported {{ exported.definitions | number }} tag{{
+          exported.definitions === 1 ? '' : 's'
+        }}
+        with {{ exported.definitions === 1 ? 'its' : 'their' }} aliases and parent tags
+      } @else {
+        Exported the tags of {{ exported.files | number }} file{{ exported.files === 1 ? '' : 's' }}
+        @if (exported.missing > 0) {
+          @if (exported.files === 1) {
+            (missing from disk)
+          } @else {
+            ({{ exported.missing | number }} of them missing from disk)
+          }
+        }
+        @if (exported.definitions > 0) {
+          and the aliases and parent tags of {{ exported.definitions | number }} tag{{
+            exported.definitions === 1 ? '' : 's'
+          }}
         }
       }
       to <code>{{ exported.path }}</code
@@ -140,6 +154,9 @@
         @if (progress.total > 0) {
           {{ progress.done | number }} of {{ progress.total | number }} files read
         }
+      } @else if (importState.source.files === 0) {
+        <!-- It only describes tags: no file to look for. -->
+        Checking the tags of the tags export…
       } @else {
         Looking for the {{ importState.source.files | number }} file{{
           importState.source.files === 1 ? '' : 's'
@@ -156,19 +173,20 @@
   </div>
 } @else if (importState.step === 'done') {
   @let result = importState.result;
+  <!-- A tags export may only describe tags: then no file was to be tagged. -->
+  @let listedFiles = importState.source.files > 0;
   <div class="outcome" role="status">
     <p>
-      @if (result.assignments === 0 && result.skipped === 0) {
+      @if (added(); as sentence) {
+        {{ sentence }}.
+        <!-- Only tags, aliases and parent tags were added: the files did not get any. -->
+        @if (result.assignments === 0 && listedFiles) {
+          No file got a new tag.
+        }
+      } @else if (result.skipped === 0 && listedFiles) {
         Nothing was added: the files already have these tags.
-      } @else if (result.assignments === 0) {
-        Nothing was added.
-      } @else if (result.newTags > 0) {
-        Added {{ result.assignments | number }} tag{{ result.assignments === 1 ? '' : 's' }} to
-        {{ result.files | number }} file{{ result.files === 1 ? '' : 's' }}, and created
-        {{ result.newTags | number }} new tag{{ result.newTags === 1 ? '' : 's' }}.
       } @else {
-        Added {{ result.assignments | number }} tag{{ result.assignments === 1 ? '' : 's' }} to
-        {{ result.files | number }} file{{ result.files === 1 ? '' : 's' }}.
+        Nothing was added.
       }
     </p>
     @if (result.notFound > 0) {

@@ -22,6 +22,8 @@ const EXPORT_WHILE_REMOVING =
  * import applied.
  */
 const BUSY = { ok: false, error: { kind: 'busy' } };
+/** What importing a tags export without tag lines adds of tags it describes: nothing. */
+const NOTHING_DEFINED = { created: 0, aliases: 0, links: 0, skipped: 0 };
 /** What renderers are sent when the definition of a tag changed. */
 const DEFINITIONS_CHANGED = ['tagsChanged', 'tagDefinitionsChanged'];
 
@@ -309,6 +311,7 @@ describe('Library', () => {
       newTags: 0,
       skipped: 0,
       notFound: 0,
+      definitions: NOTHING_DEFINED,
     });
   });
 
@@ -588,7 +591,7 @@ describe('Library', () => {
     expect(answersOf(calls)).toEqual(eachAnswering(calls, expect.objectContaining({ ok: true })));
   });
 
-  it('finds files through aliases and parent tags, and takes the tags of files to another library by name', async () => {
+  it('finds files through aliases and parent tags, and takes them to another library by name', async () => {
     await addTaggedFolders();
     const [a, b, c] = (await allFiles()) as [number, number, number];
     const sent = listen();
@@ -630,10 +633,12 @@ describe('Library', () => {
       'Trips/2024',
     ]);
 
-    // Each file is exported with the names of its own tags.
+    // The tags made or edited on purpose are exported with their aliases and parent tags, and each
+    // file with the names of its own tags.
     expect(await library.hostHandlers.exportTags(file('tags.jsonl'), APP)).toMatchObject({
       files: 3,
       tags: 4,
+      definitions: 2,
       leftOut: 0,
     });
     const lines = (await readFile(file('tags.jsonl'), 'utf8'))
@@ -641,9 +646,14 @@ describe('Library', () => {
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines[0]).toMatchObject({ format: 'sg-tag/tags', version: 2 });
+    expect(lines.slice(1, 3)).toEqual([
+      { tag: 'France' },
+      { tag: 'Paris', aliases: ['Paname'], parents: ['France'] },
+    ]);
     expect(
-      Object.fromEntries(lines.slice(1, -1).map((line) => [line['rel'], line['tags']])),
+      Object.fromEntries(lines.slice(3, -1).map((line) => [line['rel'], line['tags']])),
     ).toEqual({ 'a.jpg': ['Paris', 't'], 'b.jpg': ['t', 'Trips/2024'], 'c.jpg': ['France', 't'] });
+    expect(lines.at(-1)).toEqual({ end: true, files: 3, tags: 2 });
 
     // Another library of the same folders, where a tag already answers to the name Paris.
     await library.stop();
@@ -663,20 +673,42 @@ describe('Library', () => {
     const source = await library.hostHandlers.openTagImport(file('tags.jsonl'));
     expect(source).toMatchObject({ files: 3, tags: 4, invalid: 0 });
     const preview = await library.handlers.planTagImport(source.token);
-    // Paris is a tag here under another name: three tags are new, not four.
-    expect(preview.additions).toEqual({ assignments: 6, files: 3, newTags: 3 });
+    // Paris is a tag here under another name, Lutetia, which gets the alias Paname and goes below
+    // France. France is made as the tag lines describe it; t and Trips/2024 for their files.
+    expect(preview.additions).toEqual({ assignments: 6, files: 3, newTags: 2 });
+    expect(preview.definitions).toEqual({
+      created: 1,
+      createdItems: ['France'],
+      aliases: 1,
+      aliasItems: [{ tag: 'Lutetia', alias: 'Paname' }],
+      links: 1,
+      // Lutetia has no file yet: the import gives it one.
+      linkItems: [{ tag: 'Lutetia', parent: 'France', newlyFound: 0 }],
+      knownAs: 1,
+      knownAsItems: [{ exported: 'Paris', tag: 'Lutetia' }],
+      skipped: 0,
+      skippedItems: [],
+    });
     expect(
       await library.handlers.applyTagImport(source.token, preview.planId, false),
-    ).toMatchObject({ assignments: 6, files: 3, newTags: 3, skipped: 0, notFound: 0 });
+    ).toMatchObject({
+      assignments: 6,
+      files: 3,
+      newTags: 2,
+      skipped: 0,
+      notFound: 0,
+      definitions: { created: 1, aliases: 1, links: 1, skipped: 0 },
+    });
 
     expect(await tagsByFile()).toEqual({
       'a.jpg': ['Lutetia', 't'],
       'b.jpg': ['t', 'Trips/2024'],
       'c.jpg': ['France', 't'],
     });
-    // The aliases and the parent tags of a tag are not in a tags export: France is above no tag here.
+    const tags = await library.handlers.listTags();
+    const france = tags.find((tag) => tag.name === 'France') as Tag;
     expect(
-      (await library.handlers.listTags()).map(({ name, aliases, parentIds, fileCount }) => ({
+      tags.map(({ name, aliases, parentIds, fileCount }) => ({
         name,
         aliases,
         parentIds,
@@ -684,12 +716,13 @@ describe('Library', () => {
       })),
     ).toEqual([
       { name: 'France', aliases: [], parentIds: [], fileCount: 1 },
-      { name: 'Lutetia', aliases: ['PARIS'], parentIds: [], fileCount: 1 },
+      { name: 'Lutetia', aliases: ['Paname', 'PARIS'], parentIds: [france.id], fileCount: 1 },
       { name: 't', aliases: [], parentIds: [], fileCount: 3 },
       { name: 'Trips/2024', aliases: [], parentIds: [], fileCount: 1 },
     ]);
-    expect(await found('tag:France')).toEqual(['c.jpg']);
+    expect(await found('tag:France')).toEqual(['a.jpg', 'c.jpg']);
     expect(await found('tag:paris')).toEqual(['a.jpg']);
+    expect(await found('tag:paname')).toEqual(['a.jpg']);
     expect(await found(tagTerm('Trips/2024'))).toEqual(['b.jpg']);
     expect(await found('tag:Trips')).toEqual([]);
   });

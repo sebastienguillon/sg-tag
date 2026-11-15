@@ -253,11 +253,11 @@ export cannot hold.
    renderer `path` → `name`, tag input placeholder and Tab; doc lines made false. Nothing can
    create an alias or a parent yet. No release.
 2. `feat:` **the tags export carries aliases and parent tags.** `applyDefinitions`, tag lines,
-   resolution rules, preview and result, export gates. No release (nesting by `/` is gone with
-   nothing in its place).
+   resolution rules, preview and result, export gates, search refresh (an import can change
+   definitions alone). No release (nesting by `/` is gone with nothing in its place).
 3. `feat:` **edit a tag from the details panel.** Editor, pickers, autocomplete on aliases, "Also
-   found under", search refresh, Delete, Merge offered when an alias is taken. First state worth a
-   release: both needs are delivered.
+   found under", Delete, Merge offered when an alias is taken. First state worth a release: both
+   needs are delivered.
 4. `feat:` **the tags page.**
 
 Each pull request passes `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test &&
@@ -276,12 +276,20 @@ either writes tag code; they rebase onto it and use the bulk operation.
 Pull request 1 was reviewed from seven areas, every finding re-checked. What was not fixed there
 belongs to a later step:
 
-**Pull request 2**
+**Settled in pull request 2**
 
-- `TagExportResult.tags` still counts every tag of the library; with tag lines it becomes the tags
-  the file holds, plus a count of definitions.
-- The limit of 100 parent tags holds for every tag at all times (a delete that would pass it is
-  refused), so a tag line can rely on it.
+- The format stays version 2 (never released without tag lines). A tag line is
+  `{"tag", "aliases"?, "parents"?}`, empty lists left out; the end line counts `tags` too, and may
+  leave it out when there is no tag line.
+- `TagsRepository.applyDefinitions(definitions, dryRun)` works everything out in memory, then
+  writes unless `dryRun`: the preview and the import run the same code. A parent tag named by no
+  definition and no tag is made only if one of its links is kept.
+- "Known here under another name" also covers a tag found through its exported name being an alias
+  here (Paris, an alias of Lutetia), not only through its aliases.
+- The number of files a link newly makes a parent find is worked out for the first 100 links listed,
+  on the library's links as they are before the import.
+- `TagImportAdditions.newTags` no longer counts the tags that the tag lines make
+  (`TagDefinitionCounts.created`), so the interface adds the two.
 
 **Pull request 3**
 

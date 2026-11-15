@@ -7,7 +7,14 @@ import type { WorkerHost } from './worker-host';
 describe('exportTags', () => {
   const dataDir = path.resolve('/profile/SG Tag');
   const options = { appVersion: '2026.10.0', dataDir };
-  const exported: TagExportResult = { path: '', files: 12, missing: 1, tags: 5, leftOut: 0 };
+  const exported: TagExportResult = {
+    path: '',
+    files: 12,
+    missing: 1,
+    tags: 5,
+    definitions: 0,
+    leftOut: 0,
+  };
 
   const setup = () => {
     const calls: unknown[][] = [];

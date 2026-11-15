@@ -214,8 +214,13 @@ export interface TagExportResult {
   readonly files: number;
   /** Of `files`, those missing from disk, written for their tags. */
   readonly missing: number;
-  /** Tags in the library. */
+  /** Tags the file holds: those of its files, and those written with their aliases and parents. */
   readonly tags: number;
+  /**
+   * Of `tags`, those written with their aliases and parent tags: every tag made or edited on
+   * purpose, whether or not a file has it.
+   */
+  readonly definitions: number;
   /**
    * Distinct tags left out of at least one file: a tags export holds 1,000 tags of a file at most,
    * the first in the order of their names.
@@ -242,11 +247,11 @@ export interface TagImportSource {
   readonly exportedAt: string | null;
   /** `process.platform` of the computer it was exported from, if it says so. */
   readonly platform: string | null;
-  /** Tagged files it lists that can be read. */
+  /** Tagged files it lists that can be read: none when it only describes tags. */
   readonly files: number;
   /**
-   * Distinct tags of those files: names that differ only in letter case, or by characters nobody
-   * sees, are one tag.
+   * Distinct tags: those it describes, and those of its files. Names that differ only in letter
+   * case, or by characters nobody sees, are one tag, and so are a name and its aliases.
    */
   readonly tags: number;
   /**
@@ -309,7 +314,76 @@ export interface TagImportFolder {
   readonly addable: boolean;
 }
 
-/** What applying a tags import adds. */
+/** An alias that a tags import gives a tag, by their names. */
+export interface TagImportAlias {
+  readonly tag: string;
+  readonly alias: string;
+}
+
+/** A parent link that a tags import adds, by the names of the two tags. */
+export interface TagImportLink {
+  readonly tag: string;
+  readonly parent: string;
+}
+
+/** A link a tags import adds, and what it changes for the searches of the parent tag. */
+export interface TagImportLinkItem extends TagImportLink {
+  /**
+   * Files of `tag` and of the tags below it that a search for `parent` does not find yet, missing
+   * ones left out; `null` when `tag` is made by the import and has no file yet.
+   */
+  readonly newlyFound: number | null;
+}
+
+/** A tag of a tags export that is known here under another name, which gets its name as an alias. */
+export interface TagImportKnownAs {
+  /** Its name in the tags export. */
+  readonly exported: string;
+  /** Its name here. */
+  readonly tag: string;
+}
+
+/** Part of what a tags export says of a tag that importing it leaves out, and why. */
+export type TagImportSkip =
+  /** Another tag here, `owner`, has that name. */
+  | {
+      readonly kind: 'aliasTaken';
+      readonly tag: string;
+      readonly alias: string;
+      readonly owner: string;
+    }
+  /** The tag would have more aliases than a tag may. */
+  | { readonly kind: 'aliasLimit'; readonly tag: string; readonly alias: string }
+  /** The parent tag is the tag itself, or would be below it. */
+  | { readonly kind: 'loop'; readonly tag: string; readonly parent: string }
+  /** The tag would have more parent tags than a tag may. */
+  | { readonly kind: 'parentLimit'; readonly tag: string; readonly parent: string };
+
+/** What importing the tags that a tags export describes (aliases, parent tags) adds. */
+export interface TagDefinitionCounts {
+  /** Tags made, whether or not a file gets them. */
+  readonly created: number;
+  /** Aliases given to tags. */
+  readonly aliases: number;
+  /** Parent links added. */
+  readonly links: number;
+  /** Aliases and links left out (`TagImportSkip`). */
+  readonly skipped: number;
+}
+
+/** What importing the tags that a tags export describes would add, with the first of each. */
+export interface TagImportDefinitions extends TagDefinitionCounts {
+  /** Names of the first tags made. */
+  readonly createdItems: readonly string[];
+  readonly aliasItems: readonly TagImportAlias[];
+  readonly linkItems: readonly TagImportLinkItem[];
+  /** Tags of the tags export known here under another name. */
+  readonly knownAs: number;
+  readonly knownAsItems: readonly TagImportKnownAs[];
+  readonly skippedItems: readonly TagImportSkip[];
+}
+
+/** What applying a tags import adds to files. */
 export interface TagImportAdditions {
   /** Tags added, counted once per file. */
   readonly assignments: number;
@@ -317,7 +391,8 @@ export interface TagImportAdditions {
   readonly files: number;
   /**
    * Of the tags added, those that do not exist yet, each once: their names in the tags export are
-   * neither the name nor an alias of a tag here.
+   * neither the name nor an alias of a tag here. Tags the tags export describes are counted in
+   * `TagDefinitionCounts.created` instead, whether or not a file gets them.
    */
   readonly newTags: number;
 }
@@ -356,6 +431,8 @@ export interface TagImportPreview {
   readonly additions: TagImportAdditions;
   /** What applying adds with the changed files. */
   readonly additionsWithChanged: TagImportAdditions;
+  /** What applying adds of the tags the tags export describes, with or without the changed files. */
+  readonly definitions: TagImportDefinitions;
 }
 
 /** What applying a tags import added. */
@@ -367,6 +444,8 @@ export interface TagImportResult extends TagImportAdditions {
   readonly skipped: number;
   /** Files of the tags export not found, carried from the preview for the closing message. */
   readonly notFound: number;
+  /** What it added of the tags the tags export describes. */
+  readonly definitions: TagDefinitionCounts;
 }
 
 export interface Settings {

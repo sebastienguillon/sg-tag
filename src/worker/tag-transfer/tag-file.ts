@@ -1,8 +1,9 @@
-import { normalizeTagName, tagKey } from '@shared/tag-names';
+import { MAX_TAG_ALIASES, MAX_TAG_PARENTS, normalizeTagName, tagKey } from '@shared/tag-names';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { FINGERPRINT_SCHEME } from '../indexer/fingerprint';
 import type { TaggedFileRow } from '../library/files-repository';
+import type { TagDefinition } from '../library/tags-repository';
 import { Slicer } from './slices';
 
 export const TAG_FILE_FORMAT = 'sg-tag/tags';
@@ -13,6 +14,10 @@ export const TAG_FILE_FORMAT = 'sg-tag/tags';
  * In version 2, each string of `tags` is the name of a tag, in which `/` is an ordinary character.
  * In version 1 it was a path, each `/` of which led one level down: read as names, its tags would
  * not be the tags that were exported, so a version 1 file is refused (`EARLIER`).
+ *
+ * Version 2 also has tag lines (`tagLine`), written before the file lines: each describes a tag
+ * made or edited on purpose, with its aliases and parent tags. The kind of a line comes from its
+ * keys: a tag line has `tag`, the last line `end`, and every other line is a file line.
  */
 export const TAG_FILE_VERSION = 2;
 /**
@@ -94,6 +99,12 @@ const MAX_ROOTS = 10_000;
 /** Tags of one file: those of a line past it, or merged from other lines past it, are left out. */
 const MAX_TAGS = 1_000;
 /**
+ * Names of the tag lines, at most, counting each tag, alias and parent of each line: as many as
+ * distinct tags may be (`MAX_DISTINCT_TAGS`), far more than any library describes. Past it the file
+ * is refused, so that what its tag lines make the worker hold, and look up, stays bounded.
+ */
+const MAX_DEFINED_NAMES = 1_000_000;
+/**
  * A run of more combining marks than a file or folder name holds (`MAX_NAME_LENGTH`): no path a
  * computer writes has one. It is matched from the first mark of a run only: tried from each of
  * them, it took longer than the normalisation it guards.
@@ -140,7 +151,7 @@ const EARLIER =
   'This tags export was made by an earlier version of SG Tag: it can no longer be imported.';
 const INCOMPLETE =
   'This tags export is incomplete: it may have been cut short while being copied. Export the tags again.';
-const NOTHING_TO_READ = 'This tags export lists no tagged file that can be read.';
+const NOTHING_TO_READ = 'This tags export lists no tag that can be read.';
 const TOO_MANY_TAGS = 'This tags export lists too many tags to be imported.';
 
 export interface TagFileHeader {
@@ -181,6 +192,16 @@ export interface ImportEntry {
 export interface ParsedTagFile {
   readonly header: TagFileHeader;
   readonly entries: readonly ImportEntry[];
+  /**
+   * The tags its tag lines describe, in order, their names as `normalizeTagName` leaves them: the
+   * aliases of each at most `MAX_TAG_ALIASES`, its parents at most `MAX_TAG_PARENTS`.
+   */
+  readonly definitions: readonly TagDefinition[];
+  /**
+   * Distinct tags: those its tag lines describe, a name and its aliases being one tag, and those of
+   * its files that none of them is.
+   */
+  readonly tagCount: number;
   readonly invalid: number;
   readonly problems: readonly string[];
   /**
@@ -218,9 +239,22 @@ export function entryLine(row: TaggedFileRow, rootIndex: number, tags: readonly 
   });
 }
 
-/** The last line: a tags export without it, or with another count, was cut short. */
-export function endLine(files: number): string {
-  return line({ end: true, files });
+/**
+ * The line of a tag made or edited on purpose: its name, and its aliases and the names of its parent
+ * tags when it has any.
+ */
+export function tagLine(definition: TagDefinition): string {
+  const { name, aliases, parents } = definition;
+  return line({
+    tag: name,
+    ...(aliases.length > 0 ? { aliases } : {}),
+    ...(parents.length > 0 ? { parents } : {}),
+  });
+}
+
+/** The last line: a tags export without it, or with other counts, was cut short. */
+export function endLine(files: number, tags: number): string {
+  return line({ end: true, files, tags });
 }
 
 /**
@@ -429,8 +463,13 @@ interface ReadLine {
 class TagFileParser {
   private header: ReadHeader | null = null;
   private lineNumber = 0;
-  /** Lines between the header and the trailer, blank ones excepted. */
+  /** File lines read, blank ones excepted. */
   private fileLines = 0;
+  /** Tag lines read. */
+  private tagLines = 0;
+  /** Names of the tag lines kept, counting each tag, alias and parent of each. */
+  private definedNames = 0;
+  private readonly definitions: TagDefinition[] = [];
   private ended = false;
   private invalid = 0;
   private readonly problems: string[] = [];
@@ -468,10 +507,16 @@ class TagFileParser {
     }
     const value = text === null || !cheapToParse(text, MAX_LINE_NODES) ? null : objectOf(text);
     if (value?.['end'] === true) {
-      if (value['files'] !== this.fileLines) {
+      // A file written by hand may have no tag line, and leave their count out.
+      if (value['files'] !== this.fileLines || (value['tags'] ?? 0) !== this.tagLines) {
         throw new Error(INCOMPLETE);
       }
       this.ended = true;
+      return;
+    }
+    if (value !== null && 'tag' in value) {
+      this.tagLines++;
+      await this.define(value);
       return;
     }
     this.fileLines++;
@@ -496,16 +541,65 @@ class TagFileParser {
     if (!this.ended) {
       throw new Error(INCOMPLETE);
     }
-    if (this.entries.length === 0) {
+    if (this.entries.length === 0 && this.definitions.length === 0) {
       throw new Error(NOTHING_TO_READ);
     }
     return {
       header: this.header.header,
       entries: this.entries,
+      definitions: this.definitions,
+      tagCount: this.tagCount(),
       invalid: this.invalid,
       problems: this.problems,
       tags: this.tags,
     };
+  }
+
+  /**
+   * Keeps the tag that a tag line describes, or says why it cannot. Throws once the tag lines hold
+   * too many names.
+   */
+  private async define(value: Record<string, unknown>): Promise<void> {
+    const read = await definitionOf(value, this.slicer);
+    if (typeof read === 'string') {
+      this.problem(read);
+      return;
+    }
+    const { definition, leftOut } = read;
+    this.definedNames += 1 + definition.aliases.length + definition.parents.length;
+    if (this.definedNames > MAX_DEFINED_NAMES) {
+      throw new Error(TOO_MANY_TAGS);
+    }
+    this.definitions.push(definition);
+    if (leftOut) {
+      this.problem('an alias or a parent tag was left out');
+    }
+  }
+
+  /**
+   * Distinct tags (`ParsedTagFile.tagCount`): those of the tag lines, by the keys of their names,
+   * and those of the file lines that no name or alias of a tag line is. A tag line whose name is a
+   * name of an earlier one describes the same tag.
+   */
+  private tagCount(): number {
+    const described = new Set<string>();
+    let count = 0;
+    for (const { name, aliases } of this.definitions) {
+      const key = tagKey(name);
+      if (!described.has(key)) {
+        count++;
+        described.add(key);
+      }
+      for (const alias of aliases) {
+        described.add(tagKey(alias));
+      }
+    }
+    for (const key of this.tags.keys()) {
+      if (!described.has(key)) {
+        count++;
+      }
+    }
+    return count;
   }
 
   /** Never quotes the line: problems are shown as they are. */
@@ -805,6 +899,73 @@ async function tagsOf(value: unknown, slicer: Slicer): Promise<LineTags | null> 
     }
   }
   return { byKey, leftOut };
+}
+
+/**
+ * The tag that a tag line describes, or why it cannot be read: its name must be one
+ * (`normalizeTagName`). Of its aliases and parents, those that cannot be names, and those past the
+ * first `MAX_TAG_ALIASES` aliases and `MAX_TAG_PARENTS` parents, are left out one by one
+ * (`leftOut`); a blank one is dropped without a word, and so is one named twice, or an alias that
+ * is the name itself.
+ */
+async function definitionOf(
+  value: Record<string, unknown>,
+  slicer: Slicer,
+): Promise<{ readonly definition: TagDefinition; readonly leftOut: boolean } | string> {
+  const tag = value['tag'];
+  const check = typeof tag === 'string' ? normalizeTagName(tag) : null;
+  if (check?.ok !== true) {
+    return 'invalid tag';
+  }
+  const { name } = check;
+  const aliases = await namesOf(value['aliases'], MAX_TAG_ALIASES, slicer, tagKey(name));
+  const parents = await namesOf(value['parents'], MAX_TAG_PARENTS, slicer, null);
+  return {
+    definition: { name, aliases: aliases.names, parents: parents.names },
+    leftOut: aliases.leftOut || parents.leftOut,
+  };
+}
+
+/**
+ * The names a tag line lists under one key, each once by `tagKey` and other than `exclude`: none
+ * when the key is left out. Only the first `max` are looked at, each in a time bound by its length
+ * (`normalizeTagName`), the event loop running between two of them once a slice is spent.
+ */
+async function namesOf(
+  value: unknown,
+  max: number,
+  slicer: Slicer,
+  exclude: string | null,
+): Promise<{ readonly names: string[]; readonly leftOut: boolean }> {
+  if (value === undefined || value === null) {
+    return { names: [], leftOut: false };
+  }
+  if (!Array.isArray(value)) {
+    return { names: [], leftOut: true };
+  }
+  const inputs = value as unknown[];
+  const keys = new Set<string>(exclude === null ? [] : [exclude]);
+  const names: string[] = [];
+  let leftOut = inputs.length > max;
+  for (let index = 0; index < Math.min(inputs.length, max); index++) {
+    const input = inputs[index];
+    const check = typeof input === 'string' ? normalizeTagName(input) : null;
+    if (check === null) {
+      leftOut = true;
+    } else if (check.ok) {
+      const key = tagKey(check.name);
+      if (!keys.has(key)) {
+        keys.add(key);
+        names.push(check.name);
+      }
+    } else if (check.problem !== 'empty') {
+      leftOut = true;
+    }
+    if (slicer.due) {
+      await slicer.yield();
+    }
+  }
+  return { names, leftOut };
 }
 
 /**
