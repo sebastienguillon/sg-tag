@@ -5,7 +5,9 @@
 @let tags = tagCount();
 @let nothingToExport = noTag();
 @let removing = store.removingFolder();
-@let tagStudio = fromTagStudio();
+@let kind = importKind();
+@let source = sourceWords();
+@let catalogueReady = canImportCatalogue();
 
 <p class="lead">
   Tags are kept only in SG Tag’s data folder, never in your files: that folder holds their only
@@ -65,6 +67,20 @@
   >
     Import from TagStudio…
   </button>
+  <button
+    #catalogueButton
+    type="button"
+    class="button"
+    [attr.aria-disabled]="store.busy() || !catalogueReady ? 'true' : null"
+    [attr.aria-describedby]="catalogueReady ? null : catalogueHintId"
+    [attr.title]="catalogueReady ? null : catalogueHint"
+    (click)="openCatalogue()"
+  >
+    Import from catalogue…
+  </button>
+  @if (!catalogueReady) {
+    <span class="visually-hidden" [id]="catalogueHintId">{{ catalogueHint }}</span>
+  }
 </div>
 @if (nothingToExport) {
   <p class="hint" [id]="hintId">Nothing to export yet: there is no tag.</p>
@@ -147,11 +163,7 @@
     <app-icon class="spin" name="loader" />
     <span role="status">
       @if (importState.step === 'opening') {
-        @if (tagStudio) {
-          Reading the TagStudio library…
-        } @else {
-          Reading the tags export…
-        }
+        Reading the {{ source }}…
         @if (progress?.step === 'reading' && progress.total > 0) {
           {{ progress.done / progress.total | percent }}
         }
@@ -170,12 +182,12 @@
         }
       } @else if (importState.source.files === 0) {
         <!-- It only describes tags: no file to look for. -->
-        Checking the tags of the {{ tagStudio ? 'TagStudio library' : 'tags export' }}…
+        Checking the tags of the {{ source }}…
       } @else {
         Looking for the {{ importState.source.files | number }} file{{
           importState.source.files === 1 ? '' : 's'
         }}
-        of the {{ tagStudio ? 'TagStudio library' : 'tags export' }}…
+        of the {{ source }}…
         @if (progress?.step === 'matching' && progress.total > 0) {
           {{ progress.done | number }} done
         }
@@ -203,7 +215,16 @@
         Nothing was added.
       }
     </p>
-    @if (result.notFound > 0 && tagStudio) {
+    @if (result.notFound > 0 && kind === 'catalogue') {
+      <p>
+        {{ result.notFound | number }} file{{ result.notFound === 1 ? '' : 's' }} of the catalogue
+        {{ result.notFound === 1 ? 'was' : 'were' }} not found, or
+        {{ result.notFound === 1 ? 'is not an image or a video' : 'are not images or videos' }}, so
+        {{ result.notFound === 1 ? 'its' : 'their' }} tags were not imported. Import from the
+        catalogue again once the files are in your library folders: tags already imported are
+        skipped.
+      </p>
+    } @else if (result.notFound > 0 && kind === 'tagStudio') {
       <!-- Some may be files SG Tag does not index: adding folders would not find those. -->
       <p>
         {{ result.notFound | number }} file{{ result.notFound === 1 ? '' : 's' }} of the TagStudio
@@ -225,7 +246,7 @@
       <p>
         {{ result.skipped | number }} file{{ result.skipped === 1 ? '' : 's' }} changed or left the
         library during the import and {{ result.skipped === 1 ? 'was' : 'were' }} left out: import
-        {{ tagStudio ? 'from TagStudio' : 'the tags export' }} again to include them.
+        {{ againWords() }} again to include them.
       </p>
     }
   </div>

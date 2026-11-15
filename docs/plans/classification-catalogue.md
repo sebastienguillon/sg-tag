@@ -121,6 +121,9 @@ and date; 4 are not found.
 
 Expected on the author's library: 19 categories and 45 subcategories made, 45 parent links, about
 5,000 files tagged, and format tags only on the few files with the 8 labels the library already has.
+Run on a copy of it (2026-11-16): 64 tags made, 45 links, 5,016 tags added to 4,999 files (4,999
+found at their place, 4 deleted since), 786 format labels left out; open 55 ms, preview 242 ms,
+import 57 ms; importing again adds nothing.
 
 ## Settings
 

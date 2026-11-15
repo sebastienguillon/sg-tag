@@ -170,9 +170,23 @@ with **Add all**.
 - A file is the one at the catalogue's `Source path`, or, once moved, the one file in the library
   folders with its name, size and date (`Original size bytes`, `Original mtime nanoseconds`). A file
   found at its path with another size or date is said to have changed since it was classified.
-- Required columns: `Source path`, `Suggested category`, `Subcategory`. Read when present: the two
-  above, `Format and secondary tags`, `Confidence in category`, `Needs further review`, `Review
-status`, `Topic detail`, `Visible content` and `Review notes`. UTF-8, up to 256 MiB.
+- Required columns: `Source path`, `Suggested category` and `Subcategory`. Also read when there:
+  `Original size bytes`, `Original mtime nanoseconds`, `Format and secondary tags`,
+  `Confidence in category`, `Needs further review`, `Review status`, `Topic detail`,
+  `Visible content` and `Review notes`. UTF-8, up to 256 MiB.
+
+Settings → **Import from catalogue…** then tags every file the catalogue lists at once. As with a
+tags export, it shows what it would add before writing anything, only ever adds tags, and can be
+repeated.
+
+- Each file gets its subcategory, below its category. Rows of low confidence, rows marked
+  `Needs further review`, and the category "Needs context or audio review" are left out unless
+  their checkbox in the preview includes them.
+- A format tag is given only when a tag of the library already has its name, as its name or an
+  alias: the import never makes one. The preview lists the most frequent left out; make a tag of
+  one (or give its label to a tag as an alias) and import again to add it.
+- Files found at their path with another size or date are tagged only if the import includes the
+  files that changed.
 
 ### Tags export format
 

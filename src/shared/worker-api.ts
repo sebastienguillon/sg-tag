@@ -1,5 +1,6 @@
 import type {
   CatalogueEntry,
+  CatalogueFilters,
   CatalogueStatus,
   Diagnostics,
   FileDetails,
@@ -133,6 +134,12 @@ export interface LibraryApi {
    * of the catalogue gives it. Answers for each name added, as `addTags` does.
    */
   readonly addCatalogueTags: (id: number, names: readonly string[]) => readonly TagAddOutcome[];
+  /**
+   * Opens the classification catalogue chosen for import, its rows left out as `filters` say, and
+   * keeps it for `planTagImport`, replacing any tags export or library open. Throws, saying why,
+   * when none can be read.
+   */
+  readonly openCatalogueImport: (filters: CatalogueFilters) => TagImportSource;
 }
 
 export interface LibraryEvents {

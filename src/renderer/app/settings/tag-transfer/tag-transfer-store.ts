@@ -1,6 +1,7 @@
 import { computed, effect, inject, Injectable, resource, signal, untracked } from '@angular/core';
 import { createLogger } from '@shared/log';
 import type {
+  CatalogueFilters,
   TagExportResult,
   TagImportKind,
   TagImportPreview,
@@ -21,7 +22,10 @@ export type ExportState =
 
 export type ImportState =
   | { readonly step: 'idle' }
-  /** Dialog open, then reading the chosen tags export or TagStudio library. */
+  /**
+   * Dialog open, then reading the chosen tags export or TagStudio library; for a classification
+   * catalogue, opening the one chosen in Settings.
+   */
   | { readonly step: 'opening'; readonly kind: TagImportKind }
   | { readonly step: 'planning'; readonly source: TagImportSource }
   | {
@@ -58,7 +62,11 @@ const EXPORT_RESTARTED = 'The indexer restarted during the export. Try again.';
 const IMPORT_RESTARTED: Readonly<Record<TagImportKind, string>> = {
   tags: 'The indexer restarted. Open the tags export again.',
   tagStudio: 'The indexer restarted. Import from TagStudio again.',
+  catalogue: 'The indexer restarted. Import from the catalogue again.',
 };
+
+/** The rows of a classification catalogue an import includes at first: none of those it may leave out. */
+const DEFAULT_FILTERS: CatalogueFilters = { lowConfidence: false, flagged: false, unclear: false };
 
 /** The indexer holds no tags export of this token any more: checking again cannot work. */
 const NOT_OPEN = 'This tags export is no longer open: choose it again.';
@@ -146,6 +154,8 @@ export class TagTransferStore {
   );
   /** The import includes the changed files: yes in each new preview, until left out. */
   readonly includeChanged = signal(true);
+  /** The rows of a classification catalogue that its import includes besides the others. */
+  readonly catalogueFilters = signal(DEFAULT_FILTERS);
   /** What the indexer is doing for the export or import, as it reports it. */
   readonly progress = computed(() => this.library.status()?.tagTransfer ?? null);
   /** The latest tags export saved from this library. */
@@ -237,7 +247,8 @@ export class TagTransferStore {
 
   /**
    * Asks for a tags export, or for the folder of a TagStudio library (`kind`), then previews
-   * importing it.
+   * importing it; a classification catalogue is the one chosen in Settings, its rows filtered as
+   * `catalogueFilters` says.
    */
   async open(kind: TagImportKind = 'tags'): Promise<void> {
     if (this.busy()) {
@@ -250,10 +261,7 @@ export class TagTransferStore {
     this.importing.set(started);
     let source: TagImportSource | null = null;
     try {
-      source =
-        kind === 'tagStudio'
-          ? await this.desktop.openTagStudioImport()
-          : await this.desktop.openTagImport();
+      source = await this.openSource(kind);
     } catch (error) {
       if (this.importing() === started) {
         this.importing.set({
@@ -283,6 +291,37 @@ export class TagTransferStore {
       return;
     }
     await this.plan(source);
+  }
+
+  /**
+   * Asks for what to import from, of `kind`, and reads it; `null` when the dialog is canceled. A
+   * classification catalogue is the one chosen in Settings: no dialog.
+   */
+  private openSource(kind: TagImportKind): Promise<TagImportSource | null> {
+    switch (kind) {
+      case 'catalogue':
+        return this.worker.call('openCatalogueImport', this.catalogueFilters());
+      case 'tagStudio':
+        return this.desktop.openTagStudioImport();
+      case 'tags':
+        return this.desktop.openTagImport();
+    }
+  }
+
+  /**
+   * Includes other rows of the classification catalogue being previewed: it is opened again with
+   * them, and previewed again.
+   */
+  async filterCatalogue(filters: CatalogueFilters): Promise<void> {
+    this.catalogueFilters.set(filters);
+    const state = this.importing();
+    if (
+      (state.step === 'preview' || state.step === 'error') &&
+      state.source?.kind === 'catalogue' &&
+      !this.busy()
+    ) {
+      await this.open('catalogue');
+    }
   }
 
   /** Plans the open tags export again (Check again, after adding a folder). */

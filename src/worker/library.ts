@@ -58,6 +58,7 @@ const BUSY = { ok: false, error: { kind: 'busy' } } as const satisfies TagEditRe
 /** Why the tags of a classification catalogue cannot be added while tags are transferred. */
 const CATALOGUE_WHILE_TRANSFERRING =
   'Tags are being exported or imported: add these once that is done.';
+const NO_CATALOGUE = 'No classification catalogue can be read: choose one in Settings.';
 
 /** The indexer worker's services, exposed to the renderer (`LibraryApi`) and the main process. */
 export class Library {
@@ -206,6 +207,14 @@ export class Library {
         defined = applied.created.length + applied.aliases.length + applied.links.length > 0;
       }
       return wanted.length === 0 ? [] : this.tagFiles([id], wanted, defined);
+    },
+    openCatalogueImport: async (filters) => {
+      this.refuseImportWhileExporting();
+      const catalogue = await this.catalogue.current();
+      if (catalogue === null) {
+        throw new Error(NO_CATALOGUE);
+      }
+      return this.importer.openCatalogue(catalogue, filters);
     },
   };
 

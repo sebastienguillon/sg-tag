@@ -93,8 +93,8 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 - Zoom: ⌘/Ctrl with `+` or `=`, `-` and `0` (keypad too, on any keyboard layout), Ctrl + mouse wheel
   on Windows and Linux, or the View menu; 50% to 300%, remembered across launches.
 - Settings: library folders (add, remove, file and tagged counts, offline state), tags (data folder,
-  Export tags…, Import tags… and Import from TagStudio…), the classification catalogue, and
-  diagnostics (versions of the app, ffmpeg, ffprobe and SQLite).
+  Export tags…, Import tags…, Import from TagStudio… and Import from catalogue…), the
+  classification catalogue, and diagnostics (versions of the app, ffmpeg, ffprobe and SQLite).
   One Check for updates covers ffmpeg and ffprobe, which come with the same FFmpeg release: it asks
   ffmpeg.org for its latest release and links to its download page when that is newer. SG Tag
   contacts no website otherwise. A tool not found gets a link to install FFmpeg.
@@ -126,6 +126,11 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   subcategory, below its category as a parent tag, and its format tags, each added on its own or
   all at once. A file is the one at the catalogue's path, or, after a move, the one file in the
   library folders with its name, size and date; one that changed since it was classified says so.
+  Import from catalogue… gives every file it lists its subcategory, with the same preview and the
+  same only-adds guarantee as a tags export. It leaves out rows of low confidence, rows flagged for
+  further review and the category "Needs context or audio review" unless asked, and gives a format
+  tag only when a tag (or an alias) already has its name: it never makes one, and its preview
+  lists the most frequent left out.
 - Terminology: _library folders_ (the roots the user adds), _data folder_, _tags_, _tags export_,
   _selection_, _details panel_, _tags page_, _missing_ and _offline_ files, _indexing_,
   _classification catalogue_ (then _catalogue_), _category_, _subcategory_, _format tags_.

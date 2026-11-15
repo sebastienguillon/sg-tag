@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as Crawler from '../indexer/crawler';
+import { readCatalogue } from '../catalogue/catalogue-file';
 import { crawl, isDirectory, statFiles } from '../indexer/crawler';
 import { fingerprint, FINGERPRINT_SCHEME } from '../indexer/fingerprint';
 import { Reconciler } from '../indexer/reconciler';
@@ -1445,6 +1446,168 @@ describe('TagImporter', () => {
       { step: 'importing', done: 1_001, total: 1_001 },
       null,
     ]);
+  });
+
+  describe('classification catalogues', () => {
+    /** The folder the catalogue classifies, a library folder. */
+    let folder: string;
+    let root: RootRecord;
+    const NONE = { lowConfidence: false, flagged: false, unclear: false };
+
+    beforeEach(() => {
+      folder = path.join(dir, 'Media');
+      root = library.roots.insert(folder);
+    });
+
+    /**
+     * Reads a catalogue of `rows`, each `[rel, category, subcategory, size, mtimeMs, formats,
+     * confidence]`.
+     */
+    const catalogueOf = async (
+      rows: readonly (readonly [string, string, string, number, number, string, string])[],
+    ) => {
+      const csv = path.join(dir, 'catalogue.csv');
+      await writeFile(
+        csv,
+        [
+          'Source path,Suggested category,Subcategory,Original size bytes,' +
+            'Original mtime nanoseconds,Format and secondary tags,Confidence in category',
+          ...rows.map(([rel, category, subcategory, size, mtimeMs, formats, confidence]) =>
+            [
+              `"${path.join(folder, ...rel.split('/'))}"`,
+              category,
+              subcategory,
+              String(size),
+              `${String(mtimeMs)}000000`,
+              formats,
+              confidence,
+            ].join(','),
+          ),
+        ].join('\r\n'),
+      );
+      return readCatalogue(csv);
+    };
+    /** The name, aliases and the names of the parent tags of each tag of the library. */
+    const describedTags = (): { name: string; aliases: readonly string[]; parents: string[] }[] => {
+      const list = library.tags.list();
+      const names = new Map(list.map((tag) => [tag.id, tag.name]));
+      return list.map(({ name, aliases, parentIds }) => ({
+        name,
+        aliases,
+        parents: parentIds.map((id) => names.get(id) ?? '?'),
+      }));
+    };
+
+    it('previews the tags of a classification catalogue, then imports them', async () => {
+      library.addTag('Selfies', { aliases: ['selfie'] });
+      const a = library.addFile('Unsorted/a.jpg', { root, size: 10, mtimeMs: 5_000 });
+      const b = library.addFile('Sorted/b.jpg', { root, size: 20, mtimeMs: 6_000 });
+      const c = library.addFile('Unsorted/c.jpg', { root, size: 99, mtimeMs: 5_000 });
+      const catalogue = await catalogueOf([
+        ['Unsorted/a.jpg', 'Animals', 'Wildlife', 10, 5_000, 'selfie;phone video', 'high'],
+        ['Unsorted/b.jpg', 'Animals', 'Wildlife', 20, 6_000, '', 'high'],
+        ['Unsorted/c.jpg', 'Sports', 'Fitness', 10, 5_000, '', 'medium'],
+        ['Unsorted/d.jpg', 'Sports', 'Fitness', 10, 5_000, '', 'low'],
+        ['Unsorted/notes.txt', 'Sports', 'Fitness', 10, 5_000, '', 'high'],
+      ]);
+
+      const source = importer.openCatalogue(catalogue, NONE);
+      expect(source).toMatchObject({
+        kind: 'catalogue',
+        name: 'catalogue.csv',
+        platform: null,
+        files: 4,
+        tags: 5,
+        invalid: 0,
+        tagStudio: null,
+        catalogue: {
+          rows: 5,
+          matching: { lowConfidence: 1, flagged: 0, unclear: 0 },
+          leftOut: 1,
+          formatsWithoutTag: 1,
+          filesWithoutFormat: 1,
+          formatItems: [{ name: 'phone video', files: 1 }],
+        },
+      });
+      const preview = await importer.plan(source.token);
+      expect(library.tags.count()).toBe(1);
+      expect(preview.found).toEqual({ samePlace: 1, moved: 1, shared: 0 });
+      expect(preview.changed).toBe(1);
+      expect(preview.notFound).toMatchObject({ notMedia: 1, notFound: 0, folder: 0 });
+      expect(preview.folders).toEqual([
+        {
+          exported: path.join(folder, 'Unsorted'),
+          files: 4,
+          found: 2,
+          foundIn: [folder],
+          inLibrary: false,
+          suspicious: false,
+          addable: false,
+        },
+      ]);
+      expect(preview.definitions).toMatchObject({ created: 4, aliases: 0, links: 2, skipped: 0 });
+      expect(preview.additions).toEqual({ assignments: 3, files: 2, newTags: 0 });
+      expect(preview.additionsWithChanged).toEqual({ assignments: 4, files: 3, newTags: 0 });
+      // No file was read: the catalogue gives their size and date.
+      expect(reads).toEqual([]);
+
+      const result = await importer.apply(source.token, preview.planId, false);
+
+      expect(result).toEqual({
+        assignments: 3,
+        files: 2,
+        newTags: 0,
+        skipped: 0,
+        notFound: 1,
+        definitions: { created: 4, aliases: 0, links: 2, skipped: 0 },
+      });
+      expect(describedTags()).toEqual([
+        { name: 'Animals', aliases: [], parents: [] },
+        { name: 'Fitness', aliases: [], parents: ['Sports'] },
+        { name: 'Selfies', aliases: ['selfie'], parents: [] },
+        { name: 'Sports', aliases: [], parents: [] },
+        { name: 'Wildlife', aliases: [], parents: ['Animals'] },
+      ]);
+      expect(tagsOf(a)).toEqual(['Selfies', 'Wildlife']);
+      expect(tagsOf(b)).toEqual(['Wildlife']);
+      expect(tagsOf(c)).toEqual([]);
+
+      // Importing again adds nothing but what the changed file would get.
+      const again = importer.openCatalogue(catalogue, NONE);
+      const nothing = await importer.plan(again.token);
+      expect(nothing.additions).toEqual(NOTHING);
+      expect(nothing.additionsWithChanged).toEqual({ assignments: 1, files: 1, newTags: 0 });
+      expect(nothing.definitions).toMatchObject({ created: 0, aliases: 0, links: 0 });
+    });
+
+    it('includes the rows of low confidence when asked', async () => {
+      const d = library.addFile('d.jpg', { root, size: 10, mtimeMs: 5_000 });
+      const catalogue = await catalogueOf([['d.jpg', 'Sports', 'Fitness', 10, 5_000, '', 'low']]);
+
+      const source = importer.openCatalogue(catalogue, { ...NONE, lowConfidence: true });
+      const preview = await importer.plan(source.token);
+      await importer.apply(source.token, preview.planId, false);
+
+      expect(tagsOf(d)).toEqual(['Fitness']);
+    });
+
+    it('makes no format tag that is gone by the time the import is applied', async () => {
+      const selfies = library.addTag('Selfies', { aliases: ['selfie'] });
+      const a = library.addFile('a.jpg', { root, size: 10, mtimeMs: 5_000 });
+      const catalogue = await catalogueOf([
+        ['a.jpg', 'Animals', 'Wildlife', 10, 5_000, 'selfie', 'high'],
+      ]);
+      const source = importer.openCatalogue(catalogue, NONE);
+      const preview = await importer.plan(source.token);
+      expect(preview.additions).toEqual({ assignments: 2, files: 1, newTags: 0 });
+
+      library.tags.deleteTag(selfies);
+      const result = await importer.apply(source.token, preview.planId, false);
+
+      expect(result).toMatchObject({ assignments: 1, newTags: 0 });
+      expect(tagsOf(a)).toEqual(['Wildlife']);
+      expect(library.tags.resolve(['selfie'])).toEqual([null]);
+    });
   });
 
   describe('TagStudio libraries', () => {
