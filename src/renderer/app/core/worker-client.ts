@@ -13,6 +13,7 @@ const EVENT_NAMES = Object.keys({
   filesChanged: true,
   mediaChanged: true,
   tagsChanged: true,
+  tagDefinitionsChanged: true,
   rootsChanged: true,
 } satisfies Record<keyof LibraryEvents, true>) as (keyof LibraryEvents)[];
 

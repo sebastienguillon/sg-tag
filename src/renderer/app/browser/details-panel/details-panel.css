@@ -235,8 +235,10 @@ dd {
   margin: 0;
 }
 
+/* May quote what was typed as a tag, which can be one long word. */
 .error {
   margin: 10px 0 0;
   color: var(--danger);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }

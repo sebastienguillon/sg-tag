@@ -42,12 +42,9 @@
                   <!-- Tags the export could not hold are still lost: keep saying so. -->
                   @if (exported.leftOut === 0) {
                     Tags exported.
-                  } @else if (exported.files === 0) {
-                    No tags exported: a tags export cannot hold any of them, so removing the folder
-                    loses its tags.
                   } @else {
-                    Tags exported, except {{ exported.leftOut | number }} that a tags export cannot
-                    hold: removing the folder loses
+                    Tags exported, except {{ exported.leftOut | number }} on files that have more
+                    than 1,000 tags: removing the folder loses
                     {{ exported.leftOut === 1 ? 'that one' : 'those' }} on its files.
                   }
                   Remove from the library?

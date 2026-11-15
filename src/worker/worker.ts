@@ -6,8 +6,10 @@ import { createLogger } from '@shared/log';
 import type { Channel } from '@shared/rpc';
 import { isRpcMessage, RpcServer } from '@shared/rpc';
 import type { WorkerHostApi } from '@shared/worker-api';
-import { RENDERER_PORT_MESSAGE } from '@shared/worker-api';
+import { NEWER_LIBRARY_EXIT_CODE, RENDERER_PORT_MESSAGE } from '@shared/worker-api';
 import { parseArgs } from 'node:util';
+import { NewerLibraryError } from './database/database';
+import type { WorkerConfig } from './library';
 import { Library } from './library';
 
 const log = createLogger('worker');
@@ -35,7 +37,7 @@ if (typeof dataDir !== 'string') {
   throw new Error('The indexer worker requires --data-dir');
 }
 
-const library = new Library({
+const library = openLibrary({
   dataDir,
   resourcesDir: typeof resourcesDir === 'string' ? resourcesDir : null,
   appVersion: typeof appVersion === 'string' ? appVersion : '?',
@@ -67,6 +69,23 @@ parentPort.on('message', (event) => {
     attachRenderer(port);
   }
 });
+
+/**
+ * Opens the library. One made by a newer version of SG Tag cannot be opened, now or after a
+ * restart: the process ends with the exit code that has the main process say so and quit. Left to
+ * the handler of uncaught exceptions, as any other failure is, it would stay up and serve nothing.
+ */
+function openLibrary(config: WorkerConfig): Library {
+  try {
+    return new Library(config);
+  } catch (error) {
+    if (error instanceof NewerLibraryError) {
+      log.error(error.message);
+      process.exit(NEWER_LIBRARY_EXIT_CODE);
+    }
+    throw error;
+  }
+}
 
 function attachRenderer(port: Electron.MessagePortMain): void {
   const detach = library.attachRenderer({

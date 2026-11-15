@@ -1,3 +1,4 @@
+import { normalizeTagName } from '@shared/tag-names';
 import { mkdtemp, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,7 +44,7 @@ describe('tags export files', () => {
   const header = (fields: Record<string, unknown> = {}): string =>
     JSON.stringify({
       format: 'sg-tag/tags',
-      version: 1,
+      version: 2,
       ...HEADER,
       roots: [{ path: '/a' }],
       ...fields,
@@ -109,15 +110,15 @@ describe('tags export files', () => {
     };
     const text = [
       headerLine(HEADER),
-      entryLine(photo, 0, ['people/Ana', 'trips/2024/japan']),
-      entryLine(scan, 1, ['family']),
+      entryLine(photo, 0, ['Ana', 'Japan 2024']),
+      entryLine(scan, 1, ['family', 'AC/DC']),
       endLine(2),
     ].join('');
 
     expect(text.split('\n')).toEqual([
-      '{"format":"sg-tag/tags","version":1,"app":"2026.10.0-alpha.1","exportedAt":"2026-10-19T08:30:00.000Z","platform":"darwin","fingerprint":"sha256(size,head64k,tail64k)/32","roots":[{"path":"/Users/seb/Pictures"},{"path":"/Volumes/Archive"}]}',
-      `{"root":0,"rel":"2024/Japan/IMG_1234.JPG","path":"/Users/seb/Pictures/2024/Japan/IMG_1234.JPG","size":4718233,"mtimeMs":1717171717000,"fingerprint":"${PRINT}","sha256":null,"missing":false,"tags":["people/Ana","trips/2024/japan"]}`,
-      `{"root":1,"rel":"scan.tif","path":"/Volumes/Archive/scan.tif","size":0,"mtimeMs":1717171717000,"fingerprint":null,"sha256":"${HASH}","missing":true,"tags":["family"]}`,
+      '{"format":"sg-tag/tags","version":2,"app":"2026.10.0-alpha.1","exportedAt":"2026-10-19T08:30:00.000Z","platform":"darwin","fingerprint":"sha256(size,head64k,tail64k)/32","roots":[{"path":"/Users/seb/Pictures"},{"path":"/Volumes/Archive"}]}',
+      `{"root":0,"rel":"2024/Japan/IMG_1234.JPG","path":"/Users/seb/Pictures/2024/Japan/IMG_1234.JPG","size":4718233,"mtimeMs":1717171717000,"fingerprint":"${PRINT}","sha256":null,"missing":false,"tags":["Ana","Japan 2024"]}`,
+      `{"root":1,"rel":"scan.tif","path":"/Volumes/Archive/scan.tif","size":0,"mtimeMs":1717171717000,"fingerprint":null,"sha256":"${HASH}","missing":true,"tags":["family","AC/DC"]}`,
       '{"end":true,"files":2}',
       '',
     ]);
@@ -139,7 +140,7 @@ describe('tags export files', () => {
           fingerprint: PRINT,
           sha256: null,
           missing: false,
-          tags: ['people/Ana', 'trips/2024/japan'],
+          tags: ['Ana', 'Japan 2024'],
         },
         {
           root: 1,
@@ -150,13 +151,18 @@ describe('tags export files', () => {
           fingerprint: null,
           sha256: HASH,
           missing: true,
-          tags: ['family'],
+          tags: ['family', 'AC/DC'],
         },
       ],
       invalid: 0,
       problems: [],
-      // people, people/Ana, trips, trips/2024, trips/2024/japan and family.
-      tagCount: 6,
+      // AC/DC is one tag.
+      tags: new Map([
+        ['ana', 'Ana'],
+        ['japan 2024', 'Japan 2024'],
+        ['family', 'family'],
+        ['ac/dc', 'AC/DC'],
+      ]),
     });
   });
 
@@ -331,13 +337,29 @@ describe('tags export files', () => {
     parse.mockClear();
     await expect(read()).rejects.toThrow(NOT_AN_EXPORT);
     expect(parse).not.toHaveBeenCalled();
-  }, 15_000);
+  }, 30_000);
 
   it('asks to update SG Tag for a newer version', async () => {
-    await write([header({ version: 2, roots: 'another shape' }), entry(), trailer(1)]);
+    await write([header({ version: 3, roots: 'another shape' }), entry(), trailer(1)]);
     await expect(read()).rejects.toThrow(
       'This tags export was made by a newer version of SG Tag. Update SG Tag to import it.',
     );
+  });
+
+  it('refuses a tags export of version 1, saying an earlier version of SG Tag made it', async () => {
+    const earlier =
+      'This tags export was made by an earlier version of SG Tag: it can no longer be imported.';
+    // As version 1 wrote it: each tag a path, `trips/2024` one level below `trips`.
+    await write([
+      '{"format":"sg-tag/tags","version":1,"app":"2026.10.0-alpha.1","exportedAt":"2026-10-19T08:30:00.000Z","platform":"darwin","fingerprint":"sha256(size,head64k,tail64k)/32","roots":[{"path":"/Users/seb/Pictures"}]}',
+      `{"root":0,"rel":"a.jpg","path":"/Users/seb/Pictures/a.jpg","size":10,"mtimeMs":5,"fingerprint":"${PRINT}","sha256":null,"missing":false,"tags":["trips/2024"]}`,
+      '{"end":true,"files":1}',
+    ]);
+    await expect(read()).rejects.toThrow(new Error(earlier));
+
+    // Whatever else it holds.
+    await write([header({ version: 1, roots: 'another shape' }), trailer(0)]);
+    await expect(read()).rejects.toThrow(new Error(earlier));
   });
 
   it('refuses a tags export that was cut short', async () => {
@@ -442,7 +464,7 @@ describe('tags export files', () => {
       entry({ root: 0.5 }),
       entry({ size: -1 }),
       entry({ mtimeMs: 'yesterday' }),
-      entry({ tags: [' / ', '  '] }),
+      entry({ tags: ['', '  '] }),
       entry({ tags: secret }),
       `{"rel": "${secret}"`,
       tooLong,
@@ -463,7 +485,7 @@ describe('tags export files', () => {
     await exportOf(
       entry({ size: -1 }),
       entry({ mtimeMs: 1.5 }),
-      entry({ tags: [' / '] }),
+      entry({ tags: ['  '] }),
       `{"rel": "${secret}"`,
       Buffer.from([0x7b, 0xff, 0x7d]),
       tooLong,
@@ -490,7 +512,9 @@ describe('tags export files', () => {
     const parsed = await read({ chunkSize: 4096 });
     expect(parsed.problems).toEqual(['Line 2: too long.']);
     expect(parsed.entries.map((each) => each.segments)).toEqual([['kept.jpg']]);
-  });
+    // A line of 7 MiB read 4 KiB at a time: under 1 s alone, past 5 s when the suite loads the
+    // machine.
+  }, 30_000);
 
   it('reads back the longest line of a file within the limits on its tags and paths', async () => {
     // Characters JSON writes as `\u00XX`, 6 bytes, the most a character takes; none is blank.
@@ -504,7 +528,16 @@ describe('tags export files', () => {
         .map((digit) => sixBytes[digit])
         .join('')
         .padEnd(length, sixBytes[0]);
-    const tags = Array.from({ length: 1_000 }, (_, index) => escaped(index, 1_024));
+    // A name holds no such character: the longest are of characters of 3 bytes, the first four
+    // telling `index` apart.
+    const tags = Array.from({ length: 1_000 }, (_, index) =>
+      Array.from(String(index).padStart(4, '0'), (digit) => '零一二三四五六七八九'[Number(digit)])
+        .join('')
+        .padEnd(1_024, '語'),
+    );
+    expect(tags.map((tag) => normalizeTagName(tag))).toEqual(
+      tags.map((name) => ({ ok: true, name })),
+    );
     // 98,301 units, the most `rel` takes, of segments of 765, the most one takes.
     const segments = [
       ...Array.from({ length: 128 }, (_, index) => escaped(index, 765)),
@@ -525,24 +558,33 @@ describe('tags export files', () => {
       missing: false,
     };
     const roots = Array.from({ length: 10_000 }, (_, index) => `/${index}`);
-    const longest = entryLine(row, 9_999, tags);
-    // As `MAX_LINE_BYTES` reckons it, without the `\n`, less 5 bytes for each `/` of `rel`.
+    // The longest line the exporter writes, as `MAX_LINE_BYTES` reckons it, without the `\n`: less
+    // 5 bytes for each `/` of `rel`.
+    const written = entryLine(row, 9_999, tags);
+    expect(Buffer.byteLength(written) - 1).toBe(3_861_642 - 5 * 128);
+    // And the longest of all: the same, by a program that escapes every character but ASCII's.
+    const longest = written.replace(
+      /[\u0080-\uffff]/g,
+      (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`,
+    );
     expect(Buffer.byteLength(longest) - 1).toBe(6_933_642 - 5 * 128);
     expect(Buffer.byteLength(longest) - 1).toBeLessThanOrEqual(MAX_LINE_BYTES);
-    await writeFile(file, [headerLine({ ...HEADER, roots }), longest, endLine(1)].join(''));
 
-    const parsed = await read();
-    expect(parsed.problems).toEqual([]);
-    expect(parsed.entries).toEqual([
-      expect.objectContaining({
-        root: 9_999,
-        segments,
-        path: row.path,
-        size: row.size,
-        mtimeMs: row.mtimeMs,
-        tags,
-      }),
-    ]);
+    for (const line of [written, longest]) {
+      await writeFile(file, [headerLine({ ...HEADER, roots }), line, endLine(1)].join(''));
+      const parsed = await read();
+      expect(parsed.problems).toEqual([]);
+      expect(parsed.entries).toEqual([
+        expect.objectContaining({
+          root: 9_999,
+          segments,
+          path: row.path,
+          size: row.size,
+          mtimeMs: row.mtimeMs,
+          tags,
+        }),
+      ]);
+    }
   });
 
   it('reads the path of any file a computer holds, in NFC, and leaves out longer ones', async () => {
@@ -633,40 +675,108 @@ describe('tags export files', () => {
     }
   });
 
-  it('normalises tags and keeps each once, in its first spelling', async () => {
-    await exportOf(entry({ tags: [' Trips / 2024 ', 'trips/2024', 'Été', 'été'] }));
-
-    const parsed = await read();
-    // `NOCASE` folds ASCII letters only, so `Été` and `été` are two tags.
-    expect(parsed.entries[0]?.tags).toEqual(['Trips/2024', 'Été', 'été']);
-    expect(parsed.tagCount).toBe(4);
-  });
-
-  it('leaves out only the tags it cannot take, and says so', async () => {
-    const deepest = `ok${'/level'.repeat(63)}`;
-    const many = Array.from({ length: 1_001 }, (_, index) => `tag ${index}`);
+  it('reads each tag as a name, and keeps each once, in its first spelling', async () => {
     await exportOf(
       entry({
         tags: [
-          'people/Ana',
-          12,
-          'x'.repeat(1_025),
-          'trips/2024',
-          `deep${'/level'.repeat(64)}`,
-          // A tag of 1,024 characters and 512 levels, the shape that used to take a second.
-          `Q${'/A'.repeat(511)}`,
-          deepest,
+          // Whitespace is trimmed and collapsed.
+          ' Japan \t 2024 ',
+          'japan 2024',
+          // Letter case never tells two tags apart, accents do.
+          'Été',
+          'ÉTÉ',
+          'E\u0301te\u0301',
+          'ete',
         ],
       }),
-      entry({ rel: 'many.jpg', tags: many }),
-      // A blank tag holds nothing to leave out.
-      entry({ rel: 'blank.jpg', tags: ['kept', ' / '] }),
-      entry({ rel: 'none.jpg', tags: [12, 'x'.repeat(1_025)] }),
+    );
+
+    const parsed = await read();
+    expect(parsed.entries[0]?.tags).toEqual(['Japan 2024', 'Été', 'ete']);
+    expect([...parsed.tags]).toEqual([
+      ['japan 2024', 'Japan 2024'],
+      ['été', 'Été'],
+      ['ete', 'ete'],
+    ]);
+  });
+
+  it('keeps once the tags that only characters nobody sees tell apart, in their first spelling', async () => {
+    // A black flag, then the tag characters that spell `gbeng` and `gbsct`: nobody sees them, and
+    // they are all that tells the flag of England from that of Scotland, which stay two tags.
+    const england = '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}';
+    const scotland = '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}';
+    await exportOf(
+      entry({
+        tags: [
+          // As pasted from a web page: a soft hyphen inside the name, a zero-width space after
+          // it, direction marks around it.
+          'Pa\u00ADris',
+          'Paris',
+          'PARIS\u200B',
+          '\u200EParis\u200F',
+          // A byte order mark is whitespace to JavaScript: a name is not stored with it.
+          'Ly\uFEFFon',
+          england,
+          scotland,
+        ],
+      }),
+      entry({ rel: 'b.jpg', tags: ['paris', 'Lyon\u2060', scotland] }),
+      // Another line of the first file: only the tag it lacks is added to it.
+      entry({ tags: ['Par\u2060is', 'L\u200Byon', 'Kyoto'] }),
     );
 
     const parsed = await read();
     expect(parsed.entries.map((each) => each.tags)).toEqual([
-      ['people/Ana', 'trips/2024', deepest],
+      ['Pa\u00ADris', 'Lyon', england, scotland, 'Kyoto'],
+      ['paris', 'Lyon\u2060', scotland],
+    ]);
+    expect(parsed.problems).toEqual([]);
+    expect([...parsed.tags]).toEqual([
+      ['paris', 'Pa\u00ADris'],
+      ['lyon', 'Lyon'],
+      [england, england],
+      [scotland, scotland],
+      ['kyoto', 'Kyoto'],
+    ]);
+  });
+
+  it('reads a tag whose name holds `/` as one tag', async () => {
+    await exportOf(entry({ tags: ['AC/DC', 'trips/2024/Japan', 'Trips', ' a / b ', '/'] }));
+
+    const parsed = await read();
+    expect(parsed.entries[0]?.tags).toEqual(['AC/DC', 'trips/2024/Japan', 'Trips', 'a / b', '/']);
+    // Each a tag of its own, and no other: neither `trips/2024` nor `a`.
+    expect([...parsed.tags.keys()]).toEqual(['ac/dc', 'trips/2024/japan', 'trips', 'a / b', '/']);
+  });
+
+  it('leaves out only the tags it cannot take, and says so', async () => {
+    const longest = 'x'.repeat(1_024);
+    const many = Array.from({ length: 1_001 }, (_, index) => `tag ${index}`);
+    await exportOf(
+      entry({
+        tags: [
+          'Ana',
+          12,
+          'x'.repeat(1_025),
+          // What no name may hold: a comma separates tags, a double quote ends a search term, a
+          // leading `=` means "this tag itself" in a search.
+          'Paris, France',
+          'say "cheese"',
+          '=France',
+          'bell\u0007',
+          'Kyoto',
+          longest,
+        ],
+      }),
+      entry({ rel: 'many.jpg', tags: many }),
+      // A blank tag holds nothing to leave out.
+      entry({ rel: 'blank.jpg', tags: ['kept', '  ', '', '\u200b'] }),
+      entry({ rel: 'none.jpg', tags: [12, 'x'.repeat(1_025), 'a,b'] }),
+    );
+
+    const parsed = await read();
+    expect(parsed.entries.map((each) => each.tags)).toEqual([
+      ['Ana', 'Kyoto', longest],
       many.slice(0, 1_000),
       ['kept'],
     ]);
@@ -676,24 +786,26 @@ describe('tags export files', () => {
       'Line 5: no valid tag.',
     ]);
     expect(parsed.invalid).toBe(3);
+    // Tags left out are not counted among those of the tags export.
+    expect(parsed.tags.size).toBe(3 + 1_000 + 1);
   });
 
   it('leaves out, without normalising it, a tag of more than 30 combining marks in a row', async () => {
     // Marks in the reverse of the order NFC puts them in, which it sorts in a time that grows as
     // the square of their number: 1,000 such tags held the worker for a second.
-    const reversed = `a${'́'.repeat(512)}${'̖'.repeat(511)}`;
+    const reversed = `a${'\u0301'.repeat(512)}${'\u0316'.repeat(511)}`;
     // 30 of them, sorted in no time.
-    const thirty = `b${'́'.repeat(15)}${'̖'.repeat(15)}`;
+    const thirty = `b${'\u0301'.repeat(15)}${'\u0316'.repeat(15)}`;
     const sorted = thirty.normalize('NFC');
     await exportOf(
       entry({
-        tags: ['people/Ana', ...Array.from({ length: 998 }, () => reversed), thirty],
+        tags: ['Ana', ...Array.from({ length: 998 }, () => reversed), thirty],
       }),
     );
     const normalize = vi.spyOn(String.prototype, 'normalize');
 
     const parsed = await read();
-    expect(parsed.entries[0]?.tags).toEqual(['people/Ana', sorted]);
+    expect(parsed.entries[0]?.tags).toEqual(['Ana', sorted]);
     expect(sorted).not.toBe(thirty);
     expect(parsed.problems).toEqual(['Line 2: a tag was left out.']);
     const longRun = /\p{M}{31}/u;
@@ -701,7 +813,8 @@ describe('tags export files', () => {
   });
 
   it('lets the event loop run while it normalises the tags of one long line', async () => {
-    const tags = Array.from({ length: 100 }, (_, index) => `tag ${index}`);
+    // Capitals tell a tag from its key, which is normalised too.
+    const tags = Array.from({ length: 100 }, (_, index) => `Tag ${index}`);
     await exportOf(entry({ tags }));
     // Each look at the clock takes 1 ms, so a slice is spent every few tags.
     let clock = 0;
@@ -723,26 +836,26 @@ describe('tags export files', () => {
     ).toBeGreaterThan(3);
   });
 
-  it('exports the tags of a file it reads back, and those only, up to 1,000', async () => {
-    // Each at a limit, then just past it.
+  it('exports the first 1,000 tags of a file, and reads each of them back', async () => {
+    // Names as the library holds them, at the limits of what a name may be.
     const limits = [
       'x'.repeat(1_024),
-      'x'.repeat(1_025),
-      `ok${'/level'.repeat(63)}`,
-      `deep${'/level'.repeat(64)}`,
+      '/'.repeat(1_024),
       // Combining marks in a row.
-      `q${'̖'.repeat(30)}`,
-      `q${'̖'.repeat(31)}`,
+      `q${'\u0316'.repeat(30)}`,
+      'back\\slash',
+      // A character of two UTF-16 units.
+      'beach \u{1F3D6}',
     ];
-    const kept = limits.filter((_, index) => index % 2 === 0);
+    expect(limits.map((name) => normalizeTagName(name))).toEqual(
+      limits.map((name) => ({ ok: true, name })),
+    );
     const many = Array.from({ length: 1_000 }, (_, index) => `tag ${index}`);
 
     const held = exportedTags([...limits, ...many]);
-    expect(held).toEqual([...kept, ...many.slice(0, 997)]);
-    // As the import reads them: the same are left out.
-    await exportOf(entry({ tags: limits }));
-    expect((await read()).entries[0]?.tags).toEqual(kept);
-    // And the line of those exported is read whole, with nothing to say.
+    expect(held).toEqual([...limits, ...many.slice(0, 995)]);
+    expect(exportedTags(many)).toEqual(many);
+    // The line of those exported is read whole, with nothing to say.
     const row: TaggedFileRow = {
       id: 1,
       rootId: 1,
@@ -761,42 +874,50 @@ describe('tags export files', () => {
     expect(parsed.entries[0]?.tags).toEqual(held);
   });
 
-  it('counts each tag once with its ancestors, whatever their case and depth', async () => {
+  it('counts each tag once across lines, whatever its letter case, in its first spelling', async () => {
     await exportOf(
-      entry({ tags: ['Trips/2024/Japan', 'trips/2025', 'TRIPS', 'a/x'] }),
-      entry({ rel: 'b.jpg', tags: ['trips/2024/japan/Kyoto', 'b/x', 'Été/x'] }),
+      entry({ tags: ['Trips', 'Japan 2024', 'Été'] }),
+      entry({ rel: 'b.jpg', tags: ['TRIPS', 'japan 2024', 'Kyoto', 'ÉTÉ', 'ete'] }),
     );
 
-    // trips, trips/2024, trips/2024/japan, trips/2025, a, a/x, trips/2024/japan/kyoto, b, b/x, Été
-    // and Été/x.
-    expect((await read()).tagCount).toBe(11);
+    expect([...(await read()).tags]).toEqual([
+      ['trips', 'Trips'],
+      ['japan 2024', 'Japan 2024'],
+      ['été', 'Été'],
+      ['kyoto', 'Kyoto'],
+      ['ete', 'ete'],
+    ]);
   });
 
-  it('refuses a tags export that lists too many tags', async () => {
-    /** 1,000 tags of 64 levels, all new. */
-    const deepTags = (line: number): string[] =>
-      Array.from({ length: 1_000 }, (_, index) => `${line}-${index}${'/l'.repeat(63)}`);
-    const lines = Math.ceil((MAX_DISTINCT_TAGS + 1) / 64_000);
-    await exportOf(
-      ...Array.from({ length: lines }, (_, line) =>
-        entry({ rel: `${line}.jpg`, tags: deepTags(line) }),
+  // CPU-heavy: the full parallel run multiplies its time, past the default timeout of 5 s.
+  it('reads as many tags as a tags export may list, and refuses it at one more', async () => {
+    /** 1,000 tags that no other line has. */
+    const tagsOf = (line: number): string[] =>
+      Array.from({ length: 1_000 }, (_, index) => `t${line}-${index}`);
+    const most = [
+      ...Array.from({ length: MAX_DISTINCT_TAGS / 1_000 }, (_, line) =>
+        entry({ rel: `${line}.jpg`, tags: tagsOf(line) }),
       ),
-    );
+      // Tags that lines before have, in another letter case, are no more tags.
+      entry({ rel: 'known.jpg', tags: ['T0-0', 'T999-999'] }),
+    ];
+    const allowed = Buffer.byteLength([header(), ...most, ''].join('\n'));
+    // Blank lines, which are ignored, put the line of one more tag in a chunk of its own.
+    const chunkSize = 64 * 1024;
+    await write([header(), ...most, '\n'.repeat(chunkSize), entry({ tags: ['One more'] })]);
+    let bytesRead = 0;
 
-    await expect(read()).rejects.toThrow('This tags export lists too many tags to be imported.');
-  });
-
-  it('lets the event loop run while it counts the tags of one long line', async () => {
-    await exportOf(entry({ tags: Array.from({ length: 100 }, (_, index) => `a/b/tag ${index}`) }));
-    // Each look at the clock takes 1 ms, so a slice is spent every few tags.
-    let clock = 0;
-    vi.spyOn(performance, 'now').mockImplementation(() => clock++);
-    const slices = vi.spyOn(Slicer.prototype, 'yield');
-
-    expect((await read()).tagCount).toBe(102);
-    // More than once a line: within the line of tags.
-    expect(slices.mock.calls.length).toBeGreaterThan(3);
-  });
+    await expect(
+      read({
+        chunkSize,
+        onBytes: (bytes) => {
+          bytesRead = bytes;
+        },
+      }),
+    ).rejects.toThrow('This tags export lists too many tags to be imported.');
+    // Not before every line within the limit was read.
+    expect(bytesRead).toBeGreaterThanOrEqual(allowed);
+  }, 30_000);
 
   it('merges the lines of one file', async () => {
     await write([
@@ -839,7 +960,7 @@ describe('tags export files', () => {
     const parsed = await read();
     expect(parsed.entries.map((each) => each.tags)).toEqual([tags(0, 1_000)]);
     expect(parsed.problems).toEqual(['Line 4: a tag was left out.']);
-    expect(parsed.tagCount).toBe(1_000);
+    expect(parsed.tags.size).toBe(1_000);
   });
 
   it('drops malformed fingerprints and hashes', async () => {
@@ -885,7 +1006,7 @@ describe('tags export files', () => {
 
   it('reads chunk by chunk, never holding more than one line', async () => {
     const lines = Array.from({ length: 10_000 }, (_, index) =>
-      entry({ rel: `2024/${index}.jpg`, tags: [`batch/${index % 10}`] }),
+      entry({ rel: `2024/${index}.jpg`, tags: [`batch ${index % 10}`] }),
     );
     await exportOf(...lines);
     const longest = Math.max(...[header(), ...lines].map((text) => Buffer.byteLength(text)));
@@ -896,7 +1017,7 @@ describe('tags export files', () => {
 
     expect(parsed.entries).toHaveLength(10_000);
     expect(parsed.entries[9_999]?.segments).toEqual(['2024', '9999.jpg']);
-    expect(parsed.tagCount).toBe(11);
+    expect(parsed.tags.size).toBe(10);
     expect(progress.length).toBeGreaterThan(5_000);
     expect(progress.at(-1)).toBe((await stat(file)).size);
     expect(concat).toHaveBeenCalled();

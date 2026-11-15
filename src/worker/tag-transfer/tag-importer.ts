@@ -10,6 +10,7 @@ import type {
   TagImportSource,
   TagTransferProgress,
 } from '@shared/model';
+import { tagKey } from '@shared/tag-names';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { isDirectory } from '../indexer/crawler';
@@ -23,7 +24,6 @@ import type {
 import { caseInsensitive, pathSegments, rootsOverlap } from '../library/paths';
 import type { RootRecord, RootsRepository } from '../library/roots-repository';
 import type { TagsRepository } from '../library/tags-repository';
-import { tagKey } from '../library/tags-repository';
 import { eachInSlices, Slicer, yieldNow } from './slices';
 import type { ImportEntry, ParsedTagFile } from './tag-file';
 import { exportedPath, readTagFile } from './tag-file';
@@ -34,6 +34,19 @@ const log = createLogger('tag-transfer');
 
 /** Files per transaction when applying, and per tags query when planning. */
 const CHUNK_SIZE = 1_000;
+/**
+ * Names of a tags export looked up in the library at a time when planning, at most: about a
+ * millisecond's work for names of ordinary length, at some 10 microseconds a name in a library of
+ * 100,000 tags, so that a slice is hardly overrun. Larger batches look a name up no faster.
+ */
+const NAME_BATCH = 100;
+/**
+ * UTF-16 units of the names looked up at a time, at most. A name takes longer to look up the
+ * longer it is, up to some 0.4 ms at the 1,024 units a name may have: 100 such names would hold
+ * the worker for several slices, so they are looked up 4 at a time. Names of up to 40 units on
+ * average are still looked up 100 at a time.
+ */
+const NAME_BATCH_UNITS = 4_096;
 /** Files a preview lists, by kind. */
 const MAX_MOVED_ITEMS = 100;
 const MAX_CHANGED_ITEMS = 100;
@@ -68,11 +81,23 @@ export interface TagImporterOptions {
   readonly read?: (target: FingerprintTarget) => Promise<string>;
 }
 
+/**
+ * What a name of a tags export stands for in the library: the tag that it is the name or an alias
+ * of, by its id, or else a tag that the library lacks, by the `tagKey` of the name. Two names of
+ * one tag stand for the same.
+ */
+type NamedTag = number | string;
+
 /** A file that importing adds tags to. */
 interface Target {
   /** Where it was and what it was at the preview: if that changed, it is left out. */
   readonly snapshot: FileSnapshot;
-  /** Tags of its files in the tags export that it lacked then. */
+  /**
+   * Of the tags of its files in the tags export, those it lacked then, each by every name that
+   * those files have for it. Names and not tags: what they stand for is looked up again when they
+   * are added. Every name of a tag and not one of them: by then the tag may have lost an alias, or
+   * be gone, so that its names no longer stand for one tag, and the file gets what each stands for.
+   */
   readonly additions: readonly string[];
   /** Found at its place only: its content changed since the export, or could not be compared. */
   readonly changed: boolean;
@@ -99,7 +124,7 @@ interface Session {
 interface Found {
   readonly file: ImportCandidate;
   readonly changed: boolean;
-  /** By `tagKey`, first spelling kept. */
+  /** Their names by `tagKey`, first spelling kept. */
   readonly tags: Map<string, string>;
 }
 
@@ -113,6 +138,12 @@ type Summary = Pick<
  * Imports a tags export in two steps, adding tags and never removing any: `plan` matches its files
  * against the library and keeps what importing would add; `apply` adds exactly that, to the files
  * still where and what they were then. One tags export is open at a time.
+ *
+ * A tags export names the tags of each file. A name stands for the tag of the library that has it
+ * as its name or as an alias, or for a tag to make when none has. Files are compared by tag, so a
+ * file is not given a tag that it has under another of its names. What the names stand for is
+ * looked up for the preview and again when importing: in between, tags may be renamed, merged or
+ * deleted, and aliases added or removed.
  */
 export class TagImporter {
   private readonly options: TagImporterOptions;
@@ -121,7 +152,8 @@ export class TagImporter {
   private session: Session | null = null;
   /** Reading or planning: a newer one aborts it. */
   private task: AbortController | null = null;
-  private applying = false;
+  /** `apply` is adding tags. */
+  private importing = false;
   private lastPlanId = 0;
   private current: TagTransferProgress | null = null;
 
@@ -138,7 +170,15 @@ export class TagImporter {
 
   /** Reading, matching or applying. */
   get busy(): boolean {
-    return this.task !== null || this.applying;
+    return this.task !== null || this.importing;
+  }
+
+  /**
+   * An import is being applied: tags are being added, from the call to `apply` until all are added
+   * or adding them failed. Not while a tags export is read or a preview made, which write nothing.
+   */
+  get applying(): boolean {
+    return this.importing;
   }
 
   /**
@@ -158,7 +198,7 @@ export class TagImporter {
         },
       });
       task.signal.throwIfAborted();
-      const { header, entries, tagCount, invalid, problems } = parsed;
+      const { header, entries, tags, invalid, problems } = parsed;
       log.info(
         `Read a tags export of ${entries.length} files in ` +
           `${Math.round(performance.now() - started)} ms (${invalid} lines not read in full)`,
@@ -171,7 +211,7 @@ export class TagImporter {
         exportedAt: header.exportedAt,
         platform: header.platform,
         files: entries.length,
-        tags: tagCount,
+        tags: tags.size,
         invalid,
         problems,
       };
@@ -212,7 +252,11 @@ export class TagImporter {
       });
       const folders = await this.foldersOf(parsed, match, roots, signal);
       const { summary, found } = await summarize(parsed, match, slicer);
-      const { targets, additions, additionsWithChanged } = await this.targetsOf(found, slicer);
+      const { targets, additions, additionsWithChanged } = await this.targetsOf(
+        found,
+        parsed.tags,
+        slicer,
+      );
       const plan: Plan = {
         id: ++this.lastPlanId,
         notFound: Object.values(summary.notFound).reduce((sum, count) => sum + count, 0),
@@ -239,7 +283,7 @@ export class TagImporter {
       throw new Error(OUT_OF_DATE);
     }
     this.refuseWhileApplying();
-    this.applying = true;
+    this.importing = true;
     try {
       const result = await this.add(plan, includeChanged);
       // Importing again means opening the tags export again.
@@ -250,7 +294,7 @@ export class TagImporter {
       session.plan = null;
       throw error;
     } finally {
-      this.applying = false;
+      this.importing = false;
       this.report(null);
     }
   }
@@ -298,12 +342,43 @@ export class TagImporter {
   }
 
   /**
+   * The tags of a tags export that the library has: by `tagKey`, the id of the tag that has the
+   * name, as its name or as an alias. `names` are those of the tags export, by `tagKey`. They are
+   * looked up a batch at a time (`nameBatches`), the event loop running between two batches once a
+   * slice of `slicer` is spent: there may be a million of them.
+   */
+  private async knownTags(
+    names: ReadonlyMap<string, string>,
+    slicer: Slicer,
+  ): Promise<Map<string, number>> {
+    const known = new Map<string, number>();
+    for (const batch of nameBatches(names)) {
+      // The work before may have spent the slice.
+      if (slicer.due) {
+        await slicer.yield();
+      }
+      const resolved = this.options.tags.resolve(batch.map(([, name]) => name));
+      batch.forEach(([key], index) => {
+        const tag = resolved[index];
+        if (tag) {
+          known.set(key, tag.id);
+        }
+      });
+    }
+    return known;
+  }
+
+  /**
    * The tags each file found lacks, and what adding them adds, without the changed files and with
-   * them. Yields between two tags once a slice of `slicer` is spent: a chunk of files can bring a
+   * them. `names` are those of the tags export, by `tagKey`: what they stand for is looked up once
+   * (`knownTags`), and each file is compared by tag, so a name or an alias of a tag that the file
+   * has adds nothing, and a tag that it lacks is counted once, whatever names of it the tags export
+   * has. Yields between two tags once a slice of `slicer` is spent: a chunk of files can bring a
    * million tags, and a file found for many files of the tags export the tags of all of them.
    */
   private async targetsOf(
     found: readonly Found[],
+    names: ReadonlyMap<string, string>,
     slicer: Slicer,
   ): Promise<{
     targets: Map<number, Target>;
@@ -311,9 +386,9 @@ export class TagImporter {
     additionsWithChanged: TagImportAdditions;
   }> {
     const { tags } = this.options;
-    const existing = new Set(tags.list().map((tag) => tagKey(tag.path)));
-    const additions = new AdditionsCount(existing);
-    const withChanged = new AdditionsCount(existing);
+    const known = await this.knownTags(names, slicer);
+    const additions = new AdditionsCount();
+    const withChanged = new AdditionsCount();
     const targets = new Map<number, Target>();
     for (let start = 0; start < found.length; start += CHUNK_SIZE) {
       // The work before may have spent the slice.
@@ -321,16 +396,23 @@ export class TagImporter {
         await slicer.yield();
       }
       const batch = found.slice(start, start + CHUNK_SIZE);
-      const current = tags.pathsForFiles(batch.map(({ file }) => file.id));
+      const current = tags.idsForFiles(batch.map(({ file }) => file.id));
       for (const { file, changed, tags: brought } of batch) {
-        const has = new Set((current.get(file.id) ?? []).map(tagKey));
+        // The tags it has: a name of one of them adds nothing.
+        const had = new Set<NamedTag>(current.get(file.id));
+        // The tags it gets: each is counted once, and kept under every name of it.
+        const gets = new Set<NamedTag>();
         const lacking: string[] = [];
-        for (const [key, tag] of brought) {
-          if (!has.has(key)) {
-            lacking.push(tag);
-            withChanged.tag(key);
-            if (!changed) {
-              additions.tag(key);
+        for (const [key, name] of brought) {
+          const tag = known.get(key) ?? key;
+          if (!had.has(tag)) {
+            lacking.push(name);
+            if (!gets.has(tag)) {
+              gets.add(tag);
+              withChanged.tag(tag);
+              if (!changed) {
+                additions.tag(tag);
+              }
             }
           }
           if (slicer.due) {
@@ -390,8 +472,12 @@ export class TagImporter {
   }
 
   /**
-   * Adds the planned tags to the files of `ids` still where and what they were at the preview.
-   * Call within a transaction.
+   * Adds the planned tags to the files of `ids` still where and what they were at the preview, by
+   * what their names stand for now (`namedTags`): a file gets each tag it lacks once, whatever
+   * names of it were planned. Call within a transaction: nothing changes between the lookups and
+   * the writes, and the library takes every name that a tags export is read with
+   * (`normalizeTagName`), so each file gains exactly the tags it is found to lack, which are those
+   * counted.
    */
   private addChunk(
     plan: Plan,
@@ -403,33 +489,52 @@ export class TagImporter {
       .filter((row) => sameSnapshot(row, plan.targets.get(row.id)?.snapshot))
       .map((row) => row.id)
       .sort((a, b) => a - b);
-    const current = tags.pathsForFiles(alive);
-    // By tag, for the files still as they were only: no tag is created for nothing.
-    const byTag = new Map<string, number[]>();
+    const planned = alive.map((id) => ({ id, names: plan.targets.get(id)?.additions ?? [] }));
+    const named = this.namedTags(planned.flatMap(({ names }) => names));
+    const current = tags.idsForFiles(alive);
+    // By tag, for the files still as they were only: no tag is created for nothing. Each is added
+    // under the first name planned for it.
+    const byTag = new Map<NamedTag, { readonly name: string; readonly fileIds: number[] }>();
+    let assignments = 0;
     let gaining = 0;
-    for (const id of alive) {
-      const has = new Set((current.get(id) ?? []).map(tagKey));
-      const lacking = (plan.targets.get(id)?.additions ?? []).filter(
-        (tag) => !has.has(tagKey(tag)),
-      );
-      if (lacking.length > 0) {
-        gaining++;
-      }
-      for (const tag of lacking) {
+    for (const { id, names } of planned) {
+      // The tags it has, and then those it gets: another name of one of them adds nothing more.
+      const has = new Set<NamedTag>(current.get(id));
+      let gained = 0;
+      for (const name of names) {
+        const tag = named.get(name) as NamedTag;
+        if (has.has(tag)) {
+          continue;
+        }
+        has.add(tag);
+        gained++;
         const group = byTag.get(tag);
         if (group) {
-          group.push(id);
+          group.fileIds.push(id);
         } else {
-          byTag.set(tag, [id]);
+          byTag.set(tag, { name, fileIds: [id] });
         }
+      }
+      assignments += gained;
+      if (gained > 0) {
+        gaining++;
       }
     }
     const before = tags.count();
-    let assignments = 0;
-    for (const [tag, fileIds] of byTag) {
-      assignments += tags.addToFiles(fileIds, [tag]);
+    for (const { name, fileIds } of byTag.values()) {
+      tags.addToFiles(fileIds, [name]);
     }
     return { alive, assignments, files: gaining, newTags: tags.count() - before };
+  }
+
+  /**
+   * What each of `names` stands for in the library now: the tag that has it as its name or as an
+   * alias, or else, by its `tagKey`, a tag that the library lacks.
+   */
+  private namedTags(names: readonly string[]): Map<string, NamedTag> {
+    const distinct = [...new Set(names)];
+    const resolved = this.options.tags.resolve(distinct);
+    return new Map(distinct.map((name, index) => [name, resolved[index]?.id ?? tagKey(name)]));
   }
 
   private sessionOf(token: string): Session {
@@ -440,7 +545,7 @@ export class TagImporter {
   }
 
   private refuseWhileApplying(): void {
-    if (this.applying) {
+    if (this.importing) {
       throw new Error(APPLYING);
     }
   }
@@ -470,43 +575,53 @@ export class TagImporter {
 
 /** Counts what adding tags to files adds, one file at a time: each tag it lacks, then the file. */
 class AdditionsCount {
-  private readonly existing: ReadonlySet<string>;
   private assignments = 0;
   private files = 0;
-  /** `tagKey` of the tags created, ancestors included. */
+  /** `tagKey` of the tags that the library lacks, each once. */
   private readonly created = new Set<string>();
-
-  /** `existing`: the `tagKey` of every tag in the library. */
-  constructor(existing: ReadonlySet<string>) {
-    this.existing = existing;
-  }
 
   get result(): TagImportAdditions {
     return { assignments: this.assignments, files: this.files, newTags: this.created.size };
   }
 
   /**
-   * The file gets the tag of `key`, which it lacks. Its ancestors are looked at only up to the
-   * first one known: the ancestors of a tag of the library are in it too, and those of a tag
-   * counted were counted with it. So a tag takes a lookup or two, however deep it is and however
-   * many files get it.
+   * The file gets `tag`, which it lacks. A tag that the library lacks is counted as new once,
+   * however many files get it.
    */
-  tag(key: string): void {
+  tag(tag: NamedTag): void {
     this.assignments++;
-    let at = key;
-    while (!this.existing.has(at) && !this.created.has(at)) {
-      this.created.add(at);
-      const end = at.lastIndexOf('/');
-      if (end === -1) {
-        return;
-      }
-      at = at.slice(0, end);
+    if (typeof tag === 'string') {
+      this.created.add(tag);
     }
   }
 
   /** One more file gets tags, each counted with `tag`. */
   file(): void {
     this.files++;
+  }
+}
+
+/**
+ * `names`, those of a tags export by `tagKey`, in order and a batch at a time: a batch holds at
+ * most `NAME_BATCH` names, and at most `NAME_BATCH_UNITS` UTF-16 units in all of them.
+ */
+function* nameBatches(
+  names: ReadonlyMap<string, string>,
+): Generator<(readonly [key: string, name: string])[]> {
+  let batch: (readonly [string, string])[] = [];
+  let units = 0;
+  for (const named of names) {
+    const { length } = named[1];
+    if (batch.length === NAME_BATCH || (batch.length > 0 && units + length > NAME_BATCH_UNITS)) {
+      yield batch;
+      batch = [];
+      units = 0;
+    }
+    batch.push(named);
+    units += length;
+  }
+  if (batch.length > 0) {
+    yield batch;
   }
 }
 

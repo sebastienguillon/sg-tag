@@ -3,7 +3,7 @@ import { createLogger } from '@shared/log';
 import type { Channel, RpcArgs, RpcResult } from '@shared/rpc';
 import { isRpcMessage, RpcClient } from '@shared/rpc';
 import type { WorkerHostApi } from '@shared/worker-api';
-import { RENDERER_PORT_MESSAGE } from '@shared/worker-api';
+import { NEWER_LIBRARY_EXIT_CODE, RENDERER_PORT_MESSAGE } from '@shared/worker-api';
 import type { UtilityProcess, WebContents } from 'electron';
 import { MessageChannelMain, utilityProcess } from 'electron';
 
@@ -17,11 +17,17 @@ export interface WorkerHostOptions {
   readonly dataDir: string;
   readonly resourcesDir: string;
   readonly appVersion: string;
+  /**
+   * The indexer ended because the library was made by a newer version of SG Tag. It is not started
+   * again: it would end the same way each time.
+   */
+  readonly onNewerLibrary: () => void;
 }
 
 /**
  * Runs the indexer in an Electron utility process, restarts it if it crashes, and gives every
- * window a direct MessagePort to it (so searches never transit through the main process).
+ * window a direct MessagePort to it (so searches never transit through the main process). An
+ * indexer that cannot open the library, made by a newer version of SG Tag, is not restarted.
  */
 export class WorkerHost {
   private readonly options: WorkerHostOptions;
@@ -50,12 +56,18 @@ export class WorkerHost {
       this.client?.dispose('The indexer process exited');
       this.child = null;
       this.client = null;
-      if (!this.stopping) {
-        log.error(`Indexer exited with code ${code}; restarting.`);
-        setTimeout(() => {
-          this.start();
-        }, RESTART_DELAY_MS);
+      if (this.stopping) {
+        return;
       }
+      if (code === NEWER_LIBRARY_EXIT_CODE) {
+        log.error('The indexer cannot open a library made by a newer version; not restarting.');
+        this.options.onNewerLibrary();
+        return;
+      }
+      log.error(`Indexer exited with code ${code}; restarting.`);
+      setTimeout(() => {
+        this.start();
+      }, RESTART_DELAY_MS);
     });
     // After a restart, windows need a port to the new process.
     for (const webContents of this.windows) {

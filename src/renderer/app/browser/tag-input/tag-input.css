@@ -30,6 +30,13 @@ input {
   font: inherit;
 }
 
+/* Why the text cannot be a tag. Suggestions, when the text has any, open below this line. */
+.problem {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .suggestions {
   position: absolute;
   z-index: 1;
@@ -62,7 +69,7 @@ button.active {
   background: var(--hover);
 }
 
-.path {
+.name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

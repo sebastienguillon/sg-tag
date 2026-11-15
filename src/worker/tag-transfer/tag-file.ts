@@ -1,16 +1,20 @@
+import { normalizeTagName, tagKey } from '@shared/tag-names';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { FINGERPRINT_SCHEME } from '../indexer/fingerprint';
 import type { TaggedFileRow } from '../library/files-repository';
-import { normalizeTagPath, tagKey } from '../library/tags-repository';
 import { Slicer } from './slices';
 
 export const TAG_FILE_FORMAT = 'sg-tag/tags';
 /**
  * Bumped only for changes an older reader would misread (a field renamed, retyped or given another
  * meaning). New fields keep it: readers ignore fields they do not know.
+ *
+ * In version 2, each string of `tags` is the name of a tag, in which `/` is an ordinary character.
+ * In version 1 it was a path, each `/` of which led one level down: read as names, its tags would
+ * not be the tags that were exported, so a version 1 file is refused (`EARLIER`).
  */
-export const TAG_FILE_VERSION = 1;
+export const TAG_FILE_VERSION = 2;
 /**
  * Largest tags export read, and so written (the exporter refuses a larger one). The file is read a
  * line at a time, but its files are held until it is imported: an entry takes 1.4 times the bytes
@@ -45,18 +49,22 @@ const MAX_REL_LENGTH = NFC_GROWTH * MAX_PATH_LENGTH;
 const MAX_SEGMENT_LENGTH = NFC_GROWTH * MAX_NAME_LENGTH;
 /**
  * Longest file line read: a longer one is left out whole (`too long`). It holds the longest line a
- * file within the limits on its tags and paths can take, and the exporter writes no tag past them
- * (`exportedTags`), so that a tags export never loses a file whole for its tags on import (in a
- * file made otherwise, tags past the limits are left out one by one). As JSON, a UTF-16 unit
- * takes 6 bytes at most (`\u0001`), so:
- * - `tags`, 1,000 of 1,024 units, quoted and comma-separated: 1,000 × (1,024 × 6 + 3) + 1 =
- *   6,147,001 bytes;
+ * file within the limits on its tags and paths can take, and the exporter writes no more tags of a
+ * file than a line holds (`exportedTags`), so that a tags export never loses a file whole for its
+ * tags on import (in a file made otherwise, tags past the limits are left out one by one). As
+ * JSON, a UTF-16 unit takes 6 bytes at most (`\u0001`, or any character that its writer escapes),
+ * so:
+ * - `tags`, 1,000 names (`MAX_TAGS`) of 1,024 units (`MAX_TAG_NAME_LENGTH`), quoted and
+ *   comma-separated: 1,000 × (1,024 × 6 + 3) + 1 = 6,147,001 bytes;
  * - `rel`, 98,301 units (`MAX_REL_LENGTH`), and `path`, 32,767 (`MAX_PATH_LENGTH`), quoted:
  *   (98,301 + 32,767) × 6 + 4 = 786,412 bytes;
  * - the keys and the other values at their longest: 229 bytes;
- * 6,933,642 bytes in all, within 7 MiB. Parsing a line this long takes about 20 ms, however it is
- * made (`MAX_LINE_NODES`); its `rel` and its tags are normalised in slices (`segmentsOf`,
- * `tagsOf`).
+ * 6,933,642 bytes in all, within 7 MiB. A name counts by its length alone, whatever characters it
+ * holds. The exporter itself writes a name in 3 bytes a unit at most, since a name holds no
+ * control character, and so no line longer than 3,861,642 bytes: the bound is that of a tags
+ * export written by another program, which may escape every character. Parsing a line this long
+ * takes about 20 ms, however it is made (`MAX_LINE_NODES`); its `rel` and its tags are normalised
+ * in slices (`segmentsOf`, `tagsOf`).
  */
 export const MAX_LINE_BYTES = 7 * 1024 * 1024;
 /**
@@ -85,29 +93,18 @@ const CHUNK_BYTES = 64 * 1024;
 const MAX_ROOTS = 10_000;
 /** Tags of one file: those of a line past it, or merged from other lines past it, are left out. */
 const MAX_TAGS = 1_000;
-const MAX_TAG_LENGTH = 1_024;
-/** Levels of one tag as written (`a/b/c` has 3): a deeper tag is left out. */
-const MAX_TAG_DEPTH = 64;
 /**
- * Combining marks in a row in one tag as written, at most, as UAX #15's Stream-Safe Text Format
- * allows: a tag with a longer run is left out. NFC sorts each run of them, in time that grows as
- * the square of its length, and every character it reorders is a mark (`\p{M}`). 1,000 tags of
- * 1,024 marks out of order took a second to normalise; within this bound they take about 50 ms.
- */
-const MAX_MARK_RUN = 30;
-/**
- * A run of more than `MAX_MARK_RUN` marks, matched from the first mark of a run only: tried from
- * each of them, it took longer than NFC itself.
- */
-const LONG_MARK_RUN = new RegExp(`(?<!\\p{M})\\p{M}{${MAX_MARK_RUN + 1}}`, 'u');
-/**
- * A run of more combining marks than a name holds (`MAX_NAME_LENGTH`), matched as `LONG_MARK_RUN`
- * is: no path a computer writes has one.
+ * A run of more combining marks than a file or folder name holds (`MAX_NAME_LENGTH`): no path a
+ * computer writes has one. It is matched from the first mark of a run only: tried from each of
+ * them, it took longer than the normalisation it guards.
  */
 const LONG_PATH_MARK_RUN = new RegExp(`(?<!\\p{M})\\p{M}{${MAX_NAME_LENGTH + 1}}`, 'u');
 /**
- * Distinct tags of a tags export, ancestors included: far more than any library holds. Past it the
- * file is refused, so what it can make the worker hold and count stays bounded.
+ * Distinct tags of a tags export, at most: far more than any library holds. Names that differ only
+ * in letter case, or by characters nobody sees, are one tag (`tagKey`). Past
+ * it the file is refused, so what a tags export can make the worker hold (an entry of a map for
+ * each tag), look up in the library for each preview, and create when it is imported, stays
+ * bounded.
  */
 export const MAX_DISTINCT_TAGS = 1_000_000;
 const MAX_APP_LENGTH = 64;
@@ -139,6 +136,8 @@ const TOO_LARGE = 'This file is too large to be an SG Tag tags export.';
 const CANNOT_READ = 'Cannot read this file.';
 const NOT_AN_EXPORT = 'This is not an SG Tag tags export.';
 const NEWER = 'This tags export was made by a newer version of SG Tag. Update SG Tag to import it.';
+const EARLIER =
+  'This tags export was made by an earlier version of SG Tag: it can no longer be imported.';
 const INCOMPLETE =
   'This tags export is incomplete: it may have been cut short while being copied. Export the tags again.';
 const NOTHING_TO_READ = 'This tags export lists no tagged file that can be read.';
@@ -173,8 +172,8 @@ export interface ImportEntry {
   readonly sha256: string | null;
   readonly missing: boolean;
   /**
-   * Normalised (`normalizeTagPath`), without duplicates (`tagKey`): at most `MAX_TAGS`, each read
-   * from a tag that `holdsTag`.
+   * The names of its tags, as `normalizeTagName` leaves them, each tag once (`tagKey`): at most
+   * `MAX_TAGS`.
    */
   readonly tags: readonly string[];
 }
@@ -184,8 +183,11 @@ export interface ParsedTagFile {
   readonly entries: readonly ImportEntry[];
   readonly invalid: number;
   readonly problems: readonly string[];
-  /** Distinct tags of `entries`, ancestors included (`tagKey`). */
-  readonly tagCount: number;
+  /**
+   * The tags of `entries`, each once: by `tagKey`, its name as the tags export first spells it. At
+   * most `MAX_DISTINCT_TAGS`.
+   */
+  readonly tags: ReadonlyMap<string, string>;
 }
 
 /** The first line of a tags export. Each line writer returns its line, `\n` included. */
@@ -219,15 +221,6 @@ export function entryLine(row: TaggedFileRow, rootIndex: number, tags: readonly 
 /** The last line: a tags export without it, or with another count, was cut short. */
 export function endLine(files: number): string {
   return line({ end: true, files });
-}
-
-/**
- * Whether a tags export holds `tag`, as written: the importer leaves out a tag longer than
- * `MAX_TAG_LENGTH`, deeper than `MAX_TAG_DEPTH` or with more than `MAX_MARK_RUN` combining marks
- * in a row, and the exporter does not write one (`exportedTags`).
- */
-export function holdsTag(tag: string): boolean {
-  return tag.length <= MAX_TAG_LENGTH && levelsOf(tag) <= MAX_TAG_DEPTH && !LONG_MARK_RUN.test(tag);
 }
 
 /**
@@ -265,26 +258,20 @@ export function nfcOf(value: string): string {
 }
 
 /**
- * The tags of a file that its line holds, in order: the first `MAX_TAGS` that `holdsTag`. The
- * importer leaves none of them out, and their line fits `MAX_LINE_BYTES`.
+ * Of the names of the tags of a file, in order, those that its line holds: the first `MAX_TAGS`.
+ * The importer leaves none of them out, and their line fits `MAX_LINE_BYTES`: the library holds
+ * each name as `normalizeTagName` leaves it, which is how the importer reads one, and no two of its
+ * tags share a `tagKey`.
  */
-export function exportedTags(tags: readonly string[]): string[] {
-  const held: string[] = [];
-  for (const tag of tags) {
-    if (held.length === MAX_TAGS) {
-      break;
-    }
-    if (holdsTag(tag)) {
-      held.push(tag);
-    }
-  }
-  return held;
+export function exportedTags(names: readonly string[]): readonly string[] {
+  return names.slice(0, MAX_TAGS);
 }
 
 /**
  * Reads and checks a tags export line by line, never holding more than one line: the worker stays
  * responsive whatever the size. Throws, saying why in words fit to show, when it cannot be
- * imported; lines that cannot be read, and tags past the limits, are left out and counted instead.
+ * imported; lines that cannot be read, tags that cannot be the name of a tag and tags past the
+ * limits are left out and counted instead.
  */
 export async function readTagFile(
   filePath: string,
@@ -452,12 +439,8 @@ class TagFileParser {
   private readonly byPlace = new Map<string, ReadEntry>();
   /** `tagKey` of the tags of each entry that other lines merged into, made at the first merge. */
   private readonly mergedKeys = new Map<ReadEntry, Set<string>>();
-  /**
-   * Every tag of the entries and its ancestors, each once, as a tree: by its parent's number and
-   * the `tagKey` of its last level, its own number. A tag takes one lookup per level to count,
-   * rather than a copy of each of its ancestors.
-   */
-  private readonly tagTree = new Map<string, number>();
+  /** The tags of the entries, each once: by `tagKey`, its name as it is first spelled. */
+  private readonly tags = new Map<string, string>();
   /** Shared with the reading loop: reading the tags of a line can take more than a slice. */
   private readonly slicer: Slicer;
 
@@ -501,11 +484,9 @@ class TagFileParser {
       this.problem(read);
       return;
     }
-    const { added, leftOut } = this.keep(read);
-    if (leftOut) {
+    if (this.keep(read)) {
       this.problem('a tag was left out');
     }
-    await this.count(added);
   }
 
   result(): ParsedTagFile {
@@ -523,7 +504,7 @@ class TagFileParser {
       entries: this.entries,
       invalid: this.invalid,
       problems: this.problems,
-      tagCount: this.tagTree.size,
+      tags: this.tags,
     };
   }
 
@@ -536,26 +517,26 @@ class TagFileParser {
   }
 
   /**
-   * Adds the entry of `line`, or its tags to an earlier line of the same file, up to `MAX_TAGS`.
-   * Tells the `tagKey` of the tags added, and whether any of the line's tags was left out.
+   * Adds the entry of `line`, or its tags to an earlier line of the same file, up to `MAX_TAGS`,
+   * and counts the tags added. Tells whether any of the line's tags was left out. Throws once the
+   * tags export lists too many tags.
    */
-  private keep({ entry, keys, leftOut }: ReadLine): {
-    readonly added: readonly string[];
-    readonly leftOut: boolean;
-  } {
+  private keep({ entry, keys, leftOut }: ReadLine): boolean {
     const place = `${entry.root}/${entry.segments.join('/')}`;
     const earlier = this.byPlace.get(place);
     if (earlier === undefined) {
       this.byPlace.set(place, entry);
       this.entries.push(entry);
-      return { added: keys, leftOut };
+      entry.tags.forEach((tag, index) => {
+        this.count(keys[index] as string, tag);
+      });
+      return leftOut;
     }
     let known = this.mergedKeys.get(earlier);
     if (known === undefined) {
       known = new Set(earlier.tags.map(tagKey));
       this.mergedKeys.set(earlier, known);
     }
-    const added: string[] = [];
     let full = false;
     entry.tags.forEach((tag, index) => {
       const key = keys[index] as string;
@@ -568,34 +549,23 @@ class TagFileParser {
       }
       known.add(key);
       earlier.tags.push(tag);
-      added.push(key);
+      this.count(key, tag);
     });
-    return { added, leftOut: leftOut || full };
+    return leftOut || full;
   }
 
   /**
-   * Counts the tags of `keys` and their ancestors, yielding between two tags once a slice is spent.
-   * Throws once there are too many.
+   * Counts the tag of `key`, named `name`, unless it was counted. Throws once there are too many.
+   * A tag takes one lookup, so those of a line, `MAX_TAGS` at most, are counted in no time.
    */
-  private async count(keys: readonly string[]): Promise<void> {
-    for (const key of keys) {
-      let parent = 0;
-      for (const level of key.split('/')) {
-        const node = `${parent}/${level}`;
-        let id = this.tagTree.get(node);
-        if (id === undefined) {
-          if (this.tagTree.size >= MAX_DISTINCT_TAGS) {
-            throw new Error(TOO_MANY_TAGS);
-          }
-          id = this.tagTree.size + 1;
-          this.tagTree.set(node, id);
-        }
-        parent = id;
-      }
-      if (this.slicer.due) {
-        await this.slicer.yield();
-      }
+  private count(key: string, name: string): void {
+    if (this.tags.has(key)) {
+      return;
     }
+    if (this.tags.size >= MAX_DISTINCT_TAGS) {
+      throw new Error(TOO_MANY_TAGS);
+    }
+    this.tags.set(key, name);
   }
 }
 
@@ -664,8 +634,12 @@ function readHeader(value: Record<string, unknown> | null): ReadHeader {
   ) {
     throw new Error(NOT_AN_EXPORT);
   }
+  // Before the rest is looked at: another version may write it another way.
   if (version > TAG_FILE_VERSION) {
     throw new Error(NEWER);
+  }
+  if (version < TAG_FILE_VERSION) {
+    throw new Error(EARLIER);
   }
   const roots = rootsOf(value['roots']);
   if (roots === null) {
@@ -791,17 +765,19 @@ async function segmentsOf(rel: unknown, slicer: Slicer): Promise<string[] | null
 
 /** The tags of a line, each once. */
 interface LineTags {
-  /** Normalised, by `tagKey`, in their first spelling. */
+  /** Their names, as `normalizeTagName` leaves them, by `tagKey`, in their first spelling. */
   readonly byKey: ReadonlyMap<string, string>;
-  /** Some were not text, were not held (`holdsTag`), or came past the first `MAX_TAGS`. */
+  /** Some were not text, cannot be the name of a tag, or came past the first `MAX_TAGS`. */
   readonly leftOut: boolean;
 }
 
 /**
  * The tags of a line, or `null` when it holds no list of tags. Only the first `MAX_TAGS` are
- * looked at, only those that `holdsTag` are normalised, each in a time bound by its length, and
- * the event loop runs between two of them once a slice is spent: whatever a line holds, its tags
- * hold the worker a slice at a time. An offending tag is left out on its own.
+ * looked at, and each is checked and normalised as any name is (`normalizeTagName`), in a time
+ * bound by its length: one that is too long, or has a long run of combining marks, is refused
+ * before it is normalised. The event loop runs between two of them once a slice is spent: whatever
+ * a line holds, its tags hold the worker a slice at a time. A tag that cannot be a name is left out
+ * on its own.
  */
 async function tagsOf(value: unknown, slicer: Slicer): Promise<LineTags | null> {
   if (!Array.isArray(value)) {
@@ -812,29 +788,23 @@ async function tagsOf(value: unknown, slicer: Slicer): Promise<LineTags | null> 
   let leftOut = inputs.length > MAX_TAGS;
   for (let index = 0; index < Math.min(inputs.length, MAX_TAGS); index++) {
     const input = inputs[index];
-    if (typeof input !== 'string' || !holdsTag(input)) {
+    const check = typeof input === 'string' ? normalizeTagName(input) : null;
+    if (check === null) {
       leftOut = true;
-    } else {
-      // A blank tag (`' / '`) is dropped without a word: it holds nothing.
-      const path = normalizeTagPath(input);
-      if (path !== null && !byKey.has(tagKey(path))) {
-        byKey.set(tagKey(path), path);
+    } else if (check.ok) {
+      const key = tagKey(check.name);
+      if (!byKey.has(key)) {
+        byKey.set(key, check.name);
       }
+    } else if (check.problem !== 'empty') {
+      // A blank tag is dropped without a word: it holds nothing to leave out.
+      leftOut = true;
     }
     if (slicer.due) {
       await slicer.yield();
     }
   }
   return { byKey, leftOut };
-}
-
-/** Levels of a tag as written, blank ones included: `a/b/c` has 3. */
-function levelsOf(tag: string): number {
-  let levels = 1;
-  for (let at = tag.indexOf('/'); at !== -1; at = tag.indexOf('/', at + 1)) {
-    levels++;
-  }
-  return levels;
 }
 
 /**

@@ -8,6 +8,10 @@ import type {
   SearchResult,
   Settings,
   Tag,
+  TagAddOutcome,
+  TagDeleteResult,
+  TagDetails,
+  TagEditResult,
   TagExportRecord,
   TagExportResult,
   TagImportPreview,
@@ -23,8 +27,50 @@ export interface LibraryApi {
   readonly getDetails: (id: number) => FileDetails | null;
   readonly getSelectionTags: (ids: readonly number[]) => readonly TagUsage[];
   readonly listTags: () => readonly Tag[];
-  readonly addTags: (fileIds: readonly number[], tagPaths: readonly string[]) => void;
+  /**
+   * Tags `fileIds` with each of `names`: a name or an alias is that of its tag, and an unknown name
+   * makes a tag. Answers for each name, in order; a refused name tags nothing.
+   */
+  readonly addTags: (
+    fileIds: readonly number[],
+    names: readonly string[],
+  ) => readonly TagAddOutcome[];
+  /**
+   * Takes the tags from the files. A tag made only by tagging files goes with its last file; one
+   * made or edited on purpose stays until `deleteTag`.
+   */
   readonly removeTags: (fileIds: readonly number[], tagIds: readonly number[]) => void;
+  /** Makes a tag that no file has yet. `taken` when the name is one of an existing tag. */
+  readonly createTag: (name: string) => TagEditResult;
+  /**
+   * Renames a tag. A change of letter case only, or of characters nobody sees, is a rename; one of
+   * its own aliases becomes the name and the old name an alias; otherwise the old name stays as an
+   * alias only with `keepOldName`.
+   */
+  readonly renameTag: (id: number, name: string, keepOldName: boolean) => TagEditResult;
+  /** Gives a tag another name. One it already has changes nothing. */
+  readonly addTagAlias: (id: number, alias: string) => TagEditResult;
+  readonly removeTagAlias: (id: number, alias: string) => TagEditResult;
+  /**
+   * Puts the tag below the tag that `parentName` names (by its name or an alias), making that tag
+   * when no tag has the name. `loop` when that tag is the tag itself or below it.
+   */
+  readonly addTagParent: (id: number, parentName: string) => TagEditResult;
+  readonly removeTagParent: (id: number, parentId: number) => TagEditResult;
+  /**
+   * Deletes a tag: its files lose it, its aliases go, and its child tags move up to its parent
+   * tags, so that the tags above still find their files. `limit`, deleting nothing, when one of its
+   * child tags would then have more parent tags than a tag may.
+   */
+  readonly deleteTag: (id: number) => TagDeleteResult;
+  /**
+   * Makes one tag of two: the files, parent tags and child tags of `fromId` become those of
+   * `intoId`, and its name and aliases become aliases of `intoId`, which is answered. `loop` when
+   * one is below the other with a tag in between.
+   */
+  readonly mergeTags: (fromId: number, intoId: number) => TagEditResult;
+  /** What deleting or editing a tag is about to affect; `null` when it no longer exists. */
+  readonly getTagDetails: (id: number) => TagDetails | null;
   /** Checks the whole library for identical files; resolves to how many files have a copy. */
   readonly findDuplicates: () => number;
   /** Gives a file and each of its identical copies the tags of all of them. */
@@ -63,7 +109,13 @@ export interface LibraryEvents {
   readonly filesChanged: { readonly ids: readonly number[] | null };
   /** Thumbnails and media metadata (dimensions, duration) became available; results are unchanged. */
   readonly mediaChanged: { readonly ids: readonly number[] };
+  /** The tags of files, or the list of tags, changed. */
   readonly tagsChanged: null;
+  /**
+   * Names, aliases or parent links changed, or a tag was deleted or merged: a search by tag or by
+   * text may now find other files, though no file changed. Sent along with `tagsChanged`.
+   */
+  readonly tagDefinitionsChanged: null;
   readonly rootsChanged: null;
 }
 
@@ -108,3 +160,17 @@ export interface WorkerHostApi {
 
 /** Control message (main → worker) that carries a fresh renderer MessagePort. */
 export const RENDERER_PORT_MESSAGE = 'sg-tag:renderer-port';
+
+/**
+ * Exit code of the worker when the library was made by a newer version of SG Tag: the main process
+ * says so and quits instead of starting the worker again. Apart from the codes Node.js exits with
+ * by itself (1 to 13, and above 128 for a signal).
+ */
+export const NEWER_LIBRARY_EXIT_CODE = 100;
+
+/**
+ * What the user is told of a library made by a newer version of SG Tag: the message of the worker's
+ * error for it, which goes to its log, and what the main process shows before it quits.
+ */
+export const NEWER_LIBRARY_MESSAGE =
+  'This library was made by a newer version of SG Tag. Update SG Tag to open it.';

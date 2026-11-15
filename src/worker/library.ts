@@ -1,10 +1,11 @@
 import { createLogger } from '@shared/log';
-import type { Diagnostics, FileCopy, IndexStatus, LibraryRoot } from '@shared/model';
+import type { Diagnostics, FileCopy, IndexStatus, LibraryRoot, TagEditResult } from '@shared/model';
 import type { Channel, RpcHandlers } from '@shared/rpc';
 import { errorMessage, RpcServer } from '@shared/rpc';
 import type { LibraryApi, LibraryEvents, WorkerHostApi } from '@shared/worker-api';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { Db } from './database/database';
 import { openDatabase } from './database/database';
 import { DuplicateFinder } from './duplicates/duplicate-finder';
@@ -41,6 +42,12 @@ const STATUS_DELAY_MS = 250;
 /** Past this many changed ids, renderers are told to refresh everything instead. */
 const MAX_CHANGED_IDS = 5_000;
 
+/**
+ * What a change to the definition of tags answers while a tags export is being written or a tags
+ * import applied.
+ */
+const BUSY = { ok: false, error: { kind: 'busy' } } as const satisfies TagEditResult;
+
 /** The indexer worker's services, exposed to the renderer (`LibraryApi`) and the main process. */
 export class Library {
   readonly handlers: RpcHandlers<LibraryApi> = {
@@ -52,19 +59,66 @@ export class Library {
     },
     getSelectionTags: (ids) => this.tags.forSelection(ids),
     listTags: () => this.tags.list(),
-    addTags: (fileIds, tagPaths) => {
-      this.tags.addToFiles(fileIds, tagPaths);
+    addTags: (fileIds, names) => {
+      const outcomes = this.tags.addToFiles(fileIds, names);
+      // Only when nothing was added can a name have made a tag for no file: none of the files
+      // exists any more, forgotten a moment before. Such a tag does not stay.
+      if (!outcomes.some((outcome) => outcome.status === 'added')) {
+        this.tags.cleanup();
+      }
       this.broadcast('tagsChanged', null);
       this.fingerprinter.prioritize(fileIds);
       // Tagging a file is a good time to find out it has a copy; usually no file has its size.
       this.duplicates.check(fileIds).catch((error: unknown) => {
         log.warn('Duplicate check failed:', errorMessage(error));
       });
+      return outcomes;
     },
     removeTags: (fileIds, tagIds) => {
       this.tags.removeFromFiles(fileIds, tagIds);
       this.broadcast('tagsChanged', null);
     },
+    // The calls from here to `mergeTags` change the definition of tags: which tags exist, their
+    // names, their aliases and their parent tags. The rule each of them follows:
+    // - While a tags export is being written or a tags import applied (`transferringTags`), it
+    //   answers `busy` and changes nothing. Tagging files (`addTags`, `removeTags`) stays allowed.
+    // - A call that changed something sends `tagsChanged`.
+    // - All but `createTag` then also send `tagDefinitionsChanged`: a search by tag or by text may
+    //   now find other files. A tag just made has no file, no alias and no tag below it, so every
+    //   search finds what it found.
+    // - `deleteTag` then also sends `rootsChanged`: files may be left without a tag, and library
+    //   folders show how many of their files are tagged.
+    // - A call that answers an error, or that asked for what was already so, sends nothing.
+    createTag: (name) => {
+      if (this.transferringTags) {
+        return BUSY;
+      }
+      const result = this.tags.createTag(name);
+      if (result.ok) {
+        this.broadcast('tagsChanged', null);
+      }
+      return result;
+    },
+    renameTag: (id, name, keepOldName) =>
+      this.editTag(id, () => this.tags.renameTag(id, name, keepOldName)),
+    addTagAlias: (id, alias) => this.editTag(id, () => this.tags.addAlias(id, alias)),
+    removeTagAlias: (id, alias) => this.editTag(id, () => this.tags.removeAlias(id, alias)),
+    addTagParent: (id, parentName) => this.editTag(id, () => this.tags.addParent(id, parentName)),
+    removeTagParent: (id, parentId) => this.editTag(id, () => this.tags.removeParent(id, parentId)),
+    deleteTag: (id) => {
+      if (this.transferringTags) {
+        return BUSY;
+      }
+      const result = this.tags.deleteTag(id);
+      if (result.ok) {
+        this.broadcast('tagsChanged', null);
+        this.broadcast('tagDefinitionsChanged', null);
+        this.broadcast('rootsChanged', null);
+      }
+      return result;
+    },
+    mergeTags: (fromId, intoId) => this.editTag(intoId, () => this.tags.mergeTags(fromId, intoId)),
+    getTagDetails: (id) => this.tags.details(id),
     findDuplicates: () => this.duplicates.checkLibrary(),
     shareTagsWithCopies: (fileId) => {
       const group = this.files.contentGroup(fileId).map((copy) => copy.id);
@@ -93,7 +147,8 @@ export class Library {
         // Removed or not: the status sent shortly after also counts the files left.
         this.scheduleStatus();
       });
-      this.tags.pruneUnused();
+      // The tags that only tagging had made go with their last file; the others stay.
+      this.tags.cleanup();
       this.broadcast('rootsChanged', null);
       this.broadcast('tagsChanged', null);
       this.markChanged(null);
@@ -406,6 +461,35 @@ export class Library {
     if (this.exporter.busy) {
       throw new Error('Tags are being exported: import them once that is done.');
     }
+  }
+
+  /**
+   * A tags export is being written or a tags import applied. Either goes through the library in
+   * many steps, with other calls served in between, and a tag must stand for the same thing in all
+   * of them: its definition cannot change meanwhile. Files can still be tagged, each being written
+   * or tagged on its own. Reading, matching and previewing a tags export hold nothing back: they
+   * write nothing.
+   */
+  private get transferringTags(): boolean {
+    return this.exporter.busy || this.importer.applying;
+  }
+
+  /**
+   * Makes `edit`, a change to the definition of tag `id` that answers that tag as it then is,
+   * under the rule stated with the handlers.
+   */
+  private editTag(id: number, edit: () => TagEditResult): TagEditResult {
+    if (this.transferringTags) {
+      return BUSY;
+    }
+    const before = this.tags.get(id);
+    const result = edit();
+    // A tag answered as it was: the call asked for what was already so.
+    if (result.ok && !isDeepStrictEqual(result.tag, before)) {
+      this.broadcast('tagsChanged', null);
+      this.broadcast('tagDefinitionsChanged', null);
+    }
+    return result;
   }
 
   private describeRoot(root: RootRecord): LibraryRoot {

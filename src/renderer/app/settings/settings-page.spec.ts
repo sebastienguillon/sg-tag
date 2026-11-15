@@ -184,7 +184,7 @@ describe('SettingsPage', () => {
     button('Export tags…', confirm)?.click();
     await render();
     expect(text(confirm?.querySelector('span'))).toBe(
-      'Tags exported, except 2 that a tags export cannot hold: removing the folder loses those on its files. Remove from the library? Files on disk are not touched.',
+      'Tags exported, except 2 on files that have more than 1,000 tags: removing the folder loses those on its files. Remove from the library? Files on disk are not touched.',
     );
     expect(button('Export tags…', confirm)).toBeUndefined();
 
@@ -195,18 +195,7 @@ describe('SettingsPage', () => {
     button('Export tags…', confirm)?.click();
     await render();
     expect(text(confirm?.querySelector('span'))).toBe(
-      'Tags exported, except 1 that a tags export cannot hold: removing the folder loses that one on its files. Remove from the library? Files on disk are not touched.',
-    );
-
-    // No file kept a tag the tags export can hold: it holds none of them.
-    button('Cancel', confirm)?.click();
-    await render();
-    exportTags = () => Promise.resolve({ ...exported, files: 0, leftOut: 2 });
-    confirm = await askToRemove(pictures);
-    button('Export tags…', confirm)?.click();
-    await render();
-    expect(text(confirm?.querySelector('span'))).toBe(
-      'No tags exported: a tags export cannot hold any of them, so removing the folder loses its tags. Remove from the library? Files on disk are not touched.',
+      'Tags exported, except 1 on files that have more than 1,000 tags: removing the folder loses that one on its files. Remove from the library? Files on disk are not touched.',
     );
     expect(button('Export tags…', confirm)).toBeUndefined();
     button('Remove', confirm)?.click();

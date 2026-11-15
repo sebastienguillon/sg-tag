@@ -15,6 +15,7 @@ import {
 } from '@angular/core';
 import { createLogger } from '@shared/log';
 import type { FileCopy, FileDetails, TagRef, TagUsage } from '@shared/model';
+import { describeTagNameProblem, tagTerm } from '@shared/tag-names';
 import { DESKTOP } from '../../core/desktop';
 import { LibraryStore } from '../../core/library-store';
 import { WorkerClient } from '../../core/worker-client';
@@ -36,6 +37,20 @@ const TRASH_NAMES: Readonly<Record<string, string>> = {
 };
 
 let nextId = 0;
+
+/**
+ * A refused name is quoted up to this length, in UTF-16 units: it may be a pasted paragraph.
+ */
+const QUOTED_NAME_LENGTH = 60;
+
+/** `name` as a sentence quotes it: whole, or its start when it is long. */
+function quote(name: string): string {
+  if (name.length <= QUOTED_NAME_LENGTH) {
+    return name;
+  }
+  // Without the half of a surrogate pair that a cut through it leaves.
+  return `${name.slice(0, QUOTED_NAME_LENGTH).replace(/\p{Cs}$/u, '')}…`;
+}
 
 /**
  * How many of `group` stay on a connected drive if `id` goes to the Trash: only those receive its
@@ -123,9 +138,19 @@ export class DetailsPanel {
       new Set(
         this.tags()
           .filter((tag) => tag.fileCount === this.count())
-          .map((tag) => tag.path),
+          .map((tag) => tag.id),
       ),
   );
+  /**
+   * Why the worker made no tag of a name sent from the tag input: the line names a text that was
+   * not added, which the field no longer holds. It goes when another name is sent or other files
+   * are selected, and the refusal of a later name takes its place. A refusal that arrives after a
+   * later name was sent shows all the same, and stays: its text was not added either.
+   */
+  protected readonly tagRefusal = linkedSignal<ReadonlySet<number>, string | null>({
+    source: this.store.selection,
+    computation: () => null,
+  });
   /**
    * The file and copies moved to the Trash from here. The index may only catch up later, after a
    * scan for instance: until a reload stops returning them, they are neither listed nor counted.
@@ -250,10 +275,21 @@ export class DetailsPanel {
     this.tagInput()?.focus();
   }
 
-  protected addTag(path: string): void {
-    this.worker.call('addTags', this.selectedIds(), [path]).catch((error: unknown) => {
+  protected async addTag(name: string): Promise<void> {
+    // If other files get selected meanwhile, a refusal must not show up in front of them.
+    const selection = this.store.selection();
+    this.tagRefusal.set(null);
+    try {
+      const outcomes = await this.worker.call('addTags', this.selectedIds(), [name]);
+      const refused = outcomes.find((outcome) => outcome.status === 'refused');
+      if (refused && this.store.selection() === selection) {
+        this.tagRefusal.set(
+          `“${quote(name)}” was not added. ${describeTagNameProblem(refused.problem)}`,
+        );
+      }
+    } catch (error) {
       log.error('Cannot add tag:', error);
-    });
+    }
   }
 
   protected removeTag(tag: TagRef): void {
@@ -262,9 +298,14 @@ export class DetailsPanel {
     });
   }
 
+  /** The search that lists the files of a tag, and of the tags below it. */
+  protected tagSearch(tag: TagRef): string {
+    return tagTerm(tag.name);
+  }
+
   /** Clicking a tag searches for it. */
   protected searchTag(tag: TagRef): void {
-    this.store.query.set(/[\s",]/.test(tag.path) ? `tag:"${tag.path}"` : `tag:${tag.path}`);
+    this.store.query.set(this.tagSearch(tag));
   }
 
   protected shareTags(id: number): void {
@@ -355,7 +396,7 @@ export class DetailsPanel {
   }
 
   protected tagList(tags: readonly TagRef[]): string {
-    return tags.map((tag) => tag.path).join(', ');
+    return tags.map((tag) => tag.name).join(', ');
   }
 
   protected open(id: number): void {

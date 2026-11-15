@@ -16,7 +16,6 @@ import type {
 import type { RootRecord, RootsRepository } from '../library/roots-repository';
 import type { SettingsRepository } from '../library/settings-repository';
 import type { TagsRepository } from '../library/tags-repository';
-import { tagKey } from '../library/tags-repository';
 import { yieldNow } from './slices';
 import {
   endLine,
@@ -86,8 +85,8 @@ interface Written {
   readonly files: number;
   readonly missing: number;
   /**
-   * Distinct tags not written for at least one file: a tags export does not hold them
-   * (`exportedTags`).
+   * Distinct tags not written for at least one file: it has more tags than a tags export holds for
+   * one file (`exportedTags`).
    */
   readonly leftOut: number;
   /** Fingerprints read on the way. */
@@ -109,12 +108,12 @@ interface Running {
  * once there is something complete to put in it, and is deleted rather than left cut short if
  * saving fails or is stopped. One export runs at a time.
  *
- * Only the tags an import keeps are written (`exportedTags`), so it reads every line whole: the
- * others (far too long, too deep, with a long run of combining marks, or too many for one file)
- * are left out and counted. Every library folder is listed, whatever its path. An export its
- * import would refuse whole, larger than it reads (`MAX_TAG_FILE_BYTES`) or with a header longer
- * than it reads (`readsHeader`: thousands of library folders, or tens at the longest paths), is
- * refused rather than saved.
+ * Each tag is written by its name, and only the tags an import keeps are written (`exportedTags`),
+ * so it reads every line whole. The library holds no name that an import refuses, so the only tags
+ * left out, and counted, are those of a file past the number a tags export holds for one file.
+ * Every library folder is listed, whatever its path. An export its import would refuse whole,
+ * larger than it reads (`MAX_TAG_FILE_BYTES`) or with a header longer than it reads (`readsHeader`:
+ * thousands of library folders, or tens at the longest paths), is refused rather than saved.
  *
  * The indexer's queue is not held: each line stands on its own and ids survive moves, so the
  * export is as of a moment, and a file tagged meanwhile may or may not be in it.
@@ -162,10 +161,9 @@ export class TagExporter {
   }
 
   /**
-   * Writes every tagged file and its tags to `destination`, and records it as the latest export; a
-   * file is left out with its tags when a tags export holds none of them. Throws, saying why, when
-   * it cannot, or when its import would refuse it: a file already at `destination` is only lost
-   * when saving fails, or is stopped, after it was opened.
+   * Writes every tagged file and its tags to `destination`, and records it as the latest export.
+   * Throws, saying why, when it cannot, or when its import would refuse it: a file already at
+   * `destination` is only lost when saving fails, or is stopped, after it was opened.
    */
   async export(destination: string, appVersion: string): Promise<TagExportResult> {
     if (this.current !== null) {
@@ -281,8 +279,8 @@ export class TagExporter {
     );
     if (written.leftOut > 0) {
       log.warn(
-        `Left out ${written.leftOut} tags a tags export cannot hold (too long, too deep, ` +
-          'with a long run of combining marks, or too many on one file)',
+        `Left out ${written.leftOut} tags of files that have more tags than a tags export ` +
+          'holds for one file',
       );
     }
     return written;
@@ -304,7 +302,7 @@ export class TagExporter {
     let bytes = await writeText(handle, header);
     let count = 0;
     let missing = 0;
-    // `tagKey` of the tags left out of a file, each once.
+    // The names of the tags left out of a file, each once: no two tags share a name.
     const leftOut = new Set<string>();
     let read = 0;
     // Keyset by id: a file renamed or moved meanwhile keeps its place, so it is written once.
@@ -313,7 +311,7 @@ export class TagExporter {
       const prints = await this.readFingerprints(page, signal);
       signal.throwIfAborted();
       read += prints.size;
-      const tagsByFile = tags.pathsForFiles(page.map((row) => row.id));
+      const namesByFile = tags.namesForFiles(page.map((row) => row.id));
       let text = '';
       for (const row of page) {
         const index = rootIndex.get(row.rootId);
@@ -321,17 +319,13 @@ export class TagExporter {
         if (index === undefined) {
           continue;
         }
-        const paths = tagsByFile.get(row.id) ?? [];
-        const held = exportedTags(paths);
-        if (held.length < paths.length) {
-          const kept = new Set(held);
-          for (const tag of paths) {
-            if (!kept.has(tag)) {
-              leftOut.add(tagKey(tag));
-            }
-          }
+        const names = namesByFile.get(row.id) ?? [];
+        // The first of them, in the order of the names: the others are left out.
+        const held = exportedTags(names);
+        for (const name of names.slice(held.length)) {
+          leftOut.add(name);
         }
-        // A file may have lost its tags meanwhile, or have none a tags export holds.
+        // A file may have lost its tags meanwhile.
         if (held.length > 0) {
           const print = row.fingerprint ?? prints.get(row.id) ?? null;
           text += entryLine({ ...row, fingerprint: print }, index, held);
