@@ -167,6 +167,12 @@ export interface WorkerHostApi {
    * replacing any other. Throws, saying why, when it cannot be imported.
    */
   readonly openTagImport: (filePath: string) => TagImportSource;
+  /**
+   * Reads the TagStudio library in a folder the user chose in an open dialog (its own folder or
+   * its `.TagStudio` folder) and keeps it for `planTagImport`, replacing any tags export or
+   * library open. Throws, saying why, when it cannot be imported.
+   */
+  readonly openTagStudioImport: (folder: string) => TagImportSource;
   readonly shutdown: () => void;
 }
 

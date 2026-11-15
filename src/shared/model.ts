@@ -257,11 +257,60 @@ export interface TagExportRecord {
   readonly files: number;
 }
 
-/** A tags export read for import: nothing is written until a preview of it is applied. */
+/** What tags are imported from: a tags export, or a TagStudio library. */
+export type TagImportKind = 'tags' | 'tagStudio';
+
+/** A name of a TagStudio tag or alias, and the name it is imported as. */
+export interface TagStudioRename {
+  readonly from: string;
+  /** `null` when no name could be made of it: it is left out. */
+  readonly to: string | null;
+  /**
+   * `characters`: it held what a name here cannot (a comma, a double quote, a leading `=`, a
+   * control character); `sameName`: another tag had its name, with other parent tags.
+   */
+  readonly why: 'characters' | 'sameName';
+}
+
+/** What a TagStudio library holds that SG Tag has no place for, counted. */
+export interface TagStudioLeftOut {
+  /** Tags with a colour. */
+  readonly colors: number;
+  /** Tags with an icon. */
+  readonly icons: number;
+  /** Tags marked as categories. */
+  readonly categories: number;
+  /** Tags hidden from TagStudio's searches: they come over as ordinary tags. */
+  readonly hidden: number;
+  /** Fields of files: titles, notes, dates… */
+  readonly fields: number;
+  /** Built-in tags that come over only when used (Archived, Favorite), and Meta Tags. */
+  readonly builtIn: number;
+  /** Rows pointing at a tag or a file that is not there. */
+  readonly broken: number;
+  /** Tagged files of other folders than the library's first: a library has only one. */
+  readonly otherFolders: number;
+}
+
+/** What the preview says of a TagStudio library, besides what any import says. */
+export interface TagStudioDetails {
+  /** Version of its database. */
+  readonly version: number;
+  readonly renamed: number;
+  /** The first names imported as other names, or left out. */
+  readonly renamedItems: readonly TagStudioRename[];
+  readonly leftOut: TagStudioLeftOut;
+}
+
+/**
+ * A tags export, or a TagStudio library, read for import: nothing is written until a preview of it
+ * is applied.
+ */
 export interface TagImportSource {
   /** Identifies the open tags export for `planTagImport` and `applyTagImport`. */
   readonly token: string;
-  /** Name of the file, for display. */
+  readonly kind: TagImportKind;
+  /** Name of the file, or path of the TagStudio library's folder, for display. */
   readonly name: string;
   /** When it was exported (ISO 8601), if it says so. */
   readonly exportedAt: string | null;
@@ -284,16 +333,25 @@ export interface TagImportSource {
    * the file.
    */
   readonly problems: readonly string[];
+  /** For a TagStudio library; `null` for a tags export. */
+  readonly tagStudio: TagStudioDetails | null;
 }
 
-/** Why a file of a tags export was not found in this library. */
+/** Why a file of a tags export, or of a TagStudio library, was not found in this library. */
 export type TagImportMissReason =
   /** It was already missing from disk when the tags export was made. */
   | 'missing'
   /** Files of its size could not be compared: on a drive that is not connected, or unreadable. */
   | 'uncompared'
-  /** None of its library folder's files were found here: that folder is not in this library. */
+  /**
+   * None of its library folder's files were found here: that folder is not in this library. For a
+   * TagStudio library: the file is outside the library folders.
+   */
   | 'folder'
+  /** TagStudio: not at its place, and several files of the library folder have its name. */
+  | 'ambiguous'
+  /** TagStudio: SG Tag does not index files of its kind (only images and videos). */
+  | 'notMedia'
   | 'notFound';
 
 /** A file of a tags export, and the file it was found as here. */

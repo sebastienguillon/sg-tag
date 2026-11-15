@@ -77,6 +77,7 @@ export const fakeDesktop: DesktopBridge = {
   trashFile: () => Promise.resolve(),
   exportTags: () => Promise.resolve(null),
   openTagImport: () => Promise.resolve(null),
+  openTagStudioImport: () => Promise.resolve(null),
   latestFfmpegRelease: () => new Promise<string>(() => undefined),
 };
 

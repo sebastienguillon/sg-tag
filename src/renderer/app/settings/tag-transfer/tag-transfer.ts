@@ -12,6 +12,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import type { TagImportKind } from '@shared/model';
 import { TagsStore } from '../../core/tags-store';
 import { Icon } from '../../ui/icon/icon';
 import { TagImportPreview } from './tag-import-preview';
@@ -43,6 +44,8 @@ export class TagTransfer {
   readonly offlineFolders = input<ReadonlySet<string>>(new Set());
 
   private readonly importButton = viewChild.required<ElementRef<HTMLButtonElement>>('importButton');
+  private readonly tagStudioButton =
+    viewChild.required<ElementRef<HTMLButtonElement>>('tagStudioButton');
   private readonly preview = viewChild(TagImportPreview);
 
   protected readonly tagCount = computed(() => this.tagsStore.tags().length);
@@ -75,6 +78,20 @@ export class TagTransfer {
   });
   /** Ties Export tags… to the reason it cannot export. */
   protected readonly hintId = `export-hint-${nextId++}`;
+  /** The import shown is from a TagStudio library, not a tags export. */
+  protected readonly fromTagStudio = computed(() => {
+    const state = this.store.importState();
+    switch (state.step) {
+      case 'idle':
+        return false;
+      case 'opening':
+        return state.kind === 'tagStudio';
+      default:
+        return state.source?.kind === 'tagStudio';
+    }
+  });
+  /** What was last imported from: its button gets the focus back. */
+  private lastKind: TagImportKind = 'tags';
 
   constructor() {
     let shown: ImportState | null = null;
@@ -107,8 +124,9 @@ export class TagTransfer {
     }
   }
 
-  protected open(): void {
-    void this.store.open();
+  protected open(kind: TagImportKind): void {
+    this.lastKind = kind;
+    void this.store.open(kind);
   }
 
   protected check(): void {
@@ -117,10 +135,13 @@ export class TagTransfer {
     }
   }
 
-  /** Cancel or Escape: the tags export is closed, and Import tags… gets the focus. */
+  /**
+   * Cancel or Escape: the tags export or TagStudio library is closed, and the button that opened
+   * it gets the focus.
+   */
   protected cancel(): void {
     this.store.cancel();
-    this.importButton().nativeElement.focus();
+    this.openButton().focus();
   }
 
   protected onEscape(event: Event): void {
@@ -137,8 +158,8 @@ export class TagTransfer {
   }
 
   /**
-   * After the import moved on: a new preview gets the focus, and so does Import tags… once the
-   * outcome is known. Either only if the focus is still in this section, or was lost with the
+   * After the import moved on: a new preview gets the focus, and so does the button that opened it
+   * (Import tags… or Import from TagStudio…) once the outcome is known. Either only if the focus is still in this section, or was lost with the
    * control that had it: the user may have gone elsewhere in the meantime.
    */
   private placeFocus(state: ImportState): void {
@@ -154,7 +175,7 @@ export class TagTransfer {
       case 'done':
       case 'error':
         if (here) {
-          this.importButton().nativeElement.focus();
+          this.openButton().focus();
         }
         break;
       case 'applying':
@@ -164,9 +185,15 @@ export class TagTransfer {
       case 'planning':
         // Check again or Add as library folder went with the preview, say.
         if (lost) {
-          this.importButton().nativeElement.focus();
+          this.openButton().focus();
         }
         break;
     }
+  }
+
+  /** Import tags… or Import from TagStudio…, whichever was used last. */
+  private openButton(): HTMLButtonElement {
+    return (this.lastKind === 'tagStudio' ? this.tagStudioButton() : this.importButton())
+      .nativeElement;
   }
 }

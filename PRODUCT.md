@@ -93,7 +93,7 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 - Zoom: ⌘/Ctrl with `+` or `=`, `-` and `0` (keypad too, on any keyboard layout), Ctrl + mouse wheel
   on Windows and Linux, or the View menu; 50% to 300%, remembered across launches.
 - Settings: library folders (add, remove, file and tagged counts, offline state), tags (data folder,
-  Export tags… and Import tags…), and diagnostics (versions of the app, ffmpeg, ffprobe and SQLite).
+  Export tags…, Import tags… and Import from TagStudio…), and diagnostics (versions of the app, ffmpeg, ffprobe and SQLite).
   One Check for updates covers ffmpeg and ffprobe, which come with the same FFmpeg release: it asks
   ffmpeg.org for its latest release and links to its download page when that is newer. SG Tag
   contacts no website otherwise. A tool not found gets a link to install FFmpeg.
@@ -111,6 +111,13 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   imported. A library last opened by such a version (2026.10.0-alpha.3 or earlier) loses its tags
   the first time a later version opens it, and those versions can no longer use it: only a copy of
   the data folder made beforehand keeps its tags.
+- Import from TagStudio: reads a TagStudio library (9.5 and later) from a copy of its database made
+  in the data folder, never changing it, and adds its tags, aliases, shorthands (as aliases) and
+  parent tags, with the same preview and the same only-adds guarantee as a tags export. Files are
+  found by their place below the library's folder, or, as TagStudio's "Fix Unlinked Entries" does,
+  as the one file of their name there. Names a tag cannot have here are rewritten, tags of one name
+  with other parent tags become `Name (Parent)`, and the preview lists both, and counts what does
+  not come over (colours, icons, categories, the hidden setting, fields, unused built-in tags).
 - Terminology: _library folders_ (the roots the user adds), _data folder_, _tags_, _tags export_,
   _selection_, _details panel_, _tags page_, _missing_ and _offline_ files, _indexing_.
 - Heavy work (indexing, watching, thumbnails, database) runs in a separate indexer process, never

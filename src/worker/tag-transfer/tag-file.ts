@@ -46,12 +46,12 @@ const MAX_NAME_LENGTH = 255;
 /** NFC makes a text up to 3 times as long, in UTF-16 units (U+FB2C; UAX #15). */
 const NFC_GROWTH = 3;
 /** Longest `rel` read, 98,301 units: `rel` is the NFC of the end of a path. */
-const MAX_REL_LENGTH = NFC_GROWTH * MAX_PATH_LENGTH;
+export const MAX_REL_LENGTH = NFC_GROWTH * MAX_PATH_LENGTH;
 /**
  * Longest segment of `rel` read, 765 units: the NFC of a name. Normalising one takes well under a
  * millisecond, whatever it holds.
  */
-const MAX_SEGMENT_LENGTH = NFC_GROWTH * MAX_NAME_LENGTH;
+export const MAX_SEGMENT_LENGTH = NFC_GROWTH * MAX_NAME_LENGTH;
 /**
  * Longest file line read: a longer one is left out whole (`too long`). It holds the longest line a
  * file within the limits on its tags and paths can take, and the exporter writes no more tags of a
@@ -97,13 +97,13 @@ const MAX_HEADER_NODES = 50_000;
 const CHUNK_BYTES = 64 * 1024;
 const MAX_ROOTS = 10_000;
 /** Tags of one file: those of a line past it, or merged from other lines past it, are left out. */
-const MAX_TAGS = 1_000;
+export const MAX_TAGS = 1_000;
 /**
  * Names of the tag lines, at most, counting each tag, alias and parent of each line: as many as
  * distinct tags may be (`MAX_DISTINCT_TAGS`), far more than any library describes. Past it the file
  * is refused, so that what its tag lines make the worker hold, and look up, stays bounded.
  */
-const MAX_DEFINED_NAMES = 1_000_000;
+export const MAX_DEFINED_NAMES = 1_000_000;
 /**
  * A run of more combining marks than a file or folder name holds (`MAX_NAME_LENGTH`): no path a
  * computer writes has one. It is matched from the first mark of a run only: tried from each of

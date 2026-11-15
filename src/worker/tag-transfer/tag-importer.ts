@@ -5,6 +5,7 @@ import type {
   TagImportDefinitions,
   TagImportFolder,
   TagImportItem,
+  TagImportKind,
   TagImportMissedItem,
   TagImportMissReason,
   TagImportPreview,
@@ -14,6 +15,7 @@ import type {
 } from '@shared/model';
 import { tagKey } from '@shared/tag-names';
 import { randomUUID } from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
 import { isDirectory } from '../indexer/crawler';
 import { fingerprint } from '../indexer/fingerprint';
@@ -31,6 +33,8 @@ import type { ImportEntry, ParsedTagFile } from './tag-file';
 import { exportedPath, readTagFile } from './tag-file';
 import type { MatchResult } from './tag-matcher';
 import { matchEntries } from './tag-matcher';
+import { readTagStudioLibrary } from './tagstudio-library';
+import { matchTagStudioEntries } from './tagstudio-matcher';
 
 const log = createLogger('tag-transfer');
 
@@ -95,6 +99,11 @@ export interface TagImporterOptions {
   readonly caseInsensitive?: boolean;
   /** Reads an indexed file's fingerprint; tests inject a counting fake. */
   readonly read?: (target: FingerprintTarget) => Promise<string>;
+  /**
+   * Where a TagStudio library's database is copied to be read, and deleted from once read: a
+   * folder of the data folder. A folder of the system's temporary folder by default.
+   */
+  readonly copiesDir?: string;
 }
 
 /**
@@ -129,9 +138,11 @@ interface Plan {
   readonly targets: ReadonlyMap<number, Target>;
 }
 
-/** The open tags export. */
+/** The open tags export, or TagStudio library. */
 interface Session {
   readonly token: string;
+  /** How its files are found: by their content, or, in a TagStudio library, by their place. */
+  readonly kind: TagImportKind;
   readonly parsed: ParsedTagFile;
   /** The latest preview; none while another is being made. */
   plan: Plan | null;
@@ -223,9 +234,10 @@ export class TagImporter {
           `in ${Math.round(performance.now() - started)} ms (${invalid} lines not read in full)`,
       );
       const token = randomUUID();
-      this.session = { token, parsed, plan: null };
+      this.session = { token, kind: 'tags', parsed, plan: null };
       return {
         token,
+        kind: 'tags',
         name: path.basename(filePath),
         exportedAt: header.exportedAt,
         platform: header.platform,
@@ -233,6 +245,51 @@ export class TagImporter {
         tags: tagCount,
         invalid,
         problems,
+        tagStudio: null,
+      };
+    } finally {
+      this.settle(task);
+    }
+  }
+
+  /**
+   * Reads the TagStudio library in `folder`, chosen in an open dialog (its own folder or its
+   * `.TagStudio` folder), and keeps it open instead of any other tags export or library. Throws,
+   * saying why, when it cannot be imported.
+   */
+  async openTagStudio(folder: string): Promise<TagImportSource> {
+    this.refuseWhileApplying();
+    this.session = null;
+    const task = this.start({ step: 'reading', done: 0, total: 0 });
+    try {
+      const started = performance.now();
+      const { parsed, details } = await readTagStudioLibrary(folder, {
+        copiesDir: this.options.copiesDir ?? path.join(os.tmpdir(), 'sg-tag-imports'),
+        signal: task.signal,
+        onProgress: (done, total) => {
+          this.report({ step: 'reading', done, total });
+        },
+      });
+      task.signal.throwIfAborted();
+      const { header, entries, tagCount, invalid, problems } = parsed;
+      log.info(
+        `Read a TagStudio library (version ${String(details.version)}) of ${String(entries.length)} ` +
+          `tagged files and ${String(tagCount)} tags in ${String(Math.round(performance.now() - started))} ms`,
+      );
+      const token = randomUUID();
+      this.session = { token, kind: 'tagStudio', parsed, plan: null };
+      return {
+        token,
+        kind: 'tagStudio',
+        name: header.roots[0] ?? folder,
+        exportedAt: header.exportedAt,
+        // Its files are on this computer: "from a Windows PC" would say nothing.
+        platform: null,
+        files: entries.length,
+        tags: tagCount,
+        invalid,
+        problems,
+        tagStudio: details,
       };
     } finally {
       this.settle(task);
@@ -257,18 +314,29 @@ export class TagImporter {
       const roots = this.options.roots.list();
       // One for all steps, so that each goes on with the slice of the one before.
       const slicer = new Slicer(signal);
-      const match = await matchEntries(parsed, {
-        files: this.options.files,
-        roots,
-        isOnline: this.options.isOnline,
-        caseInsensitive: this.caseInsensitive,
-        read: this.read,
-        signal,
-        slicer,
-        onProgress: (step, done, total) => {
-          this.report({ step, done, total });
-        },
-      });
+      const onProgress = (step: 'matching' | 'comparing', done: number, total: number): void => {
+        this.report({ step, done, total });
+      };
+      const match =
+        session.kind === 'tagStudio'
+          ? await matchTagStudioEntries(parsed, {
+              files: this.options.files,
+              roots,
+              caseInsensitive: this.caseInsensitive,
+              signal,
+              slicer,
+              onProgress,
+            })
+          : await matchEntries(parsed, {
+              files: this.options.files,
+              roots,
+              isOnline: this.options.isOnline,
+              caseInsensitive: this.caseInsensitive,
+              read: this.read,
+              signal,
+              slicer,
+              onProgress,
+            });
       const folders = await this.foldersOf(parsed, match, roots, signal);
       const { summary, found } = await summarize(parsed, match, slicer);
       if (slicer.due) {
@@ -767,6 +835,8 @@ async function summarize(
     missing: 0,
     uncompared: 0,
     folder: 0,
+    ambiguous: 0,
+    notMedia: 0,
     notFound: 0,
   };
   let changed = 0;

@@ -217,6 +217,10 @@ export class Library {
       this.refuseImportWhileExporting();
       return this.importer.open(filePath);
     },
+    openTagStudioImport: (folder) => {
+      this.refuseImportWhileExporting();
+      return this.importer.openTagStudio(folder);
+    },
     shutdown: () => this.stop(),
   };
 
@@ -340,6 +344,7 @@ export class Library {
       onProgress: () => {
         this.scheduleStatus();
       },
+      copiesDir: path.join(config.dataDir, 'imports'),
     });
     if (this.tools.ffmpeg === null) {
       log.warn('ffmpeg not found: video thumbnails fall back to the OS thumbnailer, if any.');

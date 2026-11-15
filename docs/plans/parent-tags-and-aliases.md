@@ -325,18 +325,9 @@ belongs to a later step:
 - A file whose own name holds a character nobody sees (`Ber`, a soft hyphen, `lin.jpg`) is not found
   by `Berlin`: that needs an index of names without them.
 
-## For the TagStudio import (its own branch)
+## For the TagStudio import
 
-- Same-named tags are a designed TagStudio feature (names are not unique; "Folders to Tags" makes
-  one `2024` per parent). Rule: same parents → one tag; different parents → `Name (Parent)`,
-  repeated until unique, each listed in the preview.
-- Shorthand → an alias. An alias or shorthand shared by several tags: the first owner keeps it, the
-  others are listed.
-- TagStudio lets loops be saved: the bulk rule above skips them.
-- Hidden tags (`Archived`), colours and categories do not come over: the preview says so.
-- TagStudio does not enforce foreign keys: rows pointing at deleted tags are dropped and counted.
-- Read `ts_library.sqlite` when it exists, `ts_library.json` only otherwise. Accept versions 6 to
-  499; below 100 the two columns of `tag_parents` are swapped.
+Moved to its own plan, `tagstudio-import.md`.
 
 ## Not in v1
 

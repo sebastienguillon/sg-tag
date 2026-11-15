@@ -27,6 +27,7 @@ const exported: TagExportResult = {
 
 const source: TagImportSource = {
   token: 'token-1',
+  kind: 'tags',
   name: 'SG Tag tags 2026-10-12.jsonl',
   exportedAt: '2026-10-12T12:00:00.000Z',
   platform: 'darwin',
@@ -34,6 +35,7 @@ const source: TagImportSource = {
   tags: 2,
   invalid: 0,
   problems: [],
+  tagStudio: null,
 };
 
 /** A tags export that describes no tag: it adds no alias or parent tag. */
@@ -43,7 +45,7 @@ const preview: TagImportPreview = {
   planId: 1,
   found: { samePlace: 3, moved: 0, shared: 0 },
   changed: 0,
-  notFound: { missing: 0, uncompared: 0, folder: 0, notFound: 0 },
+  notFound: { missing: 0, uncompared: 0, folder: 0, ambiguous: 0, notMedia: 0, notFound: 0 },
   folders: [
     {
       exported: '/Users/seb/Pictures',
