@@ -516,6 +516,8 @@ describe('tags export files', () => {
     // machine.
   }, 30_000);
 
+  // About 2.5 s alone, but over 5 s while the other test files run alongside: past the default
+  // timeout, it would fail.
   it('reads back the longest line of a file within the limits on its tags and paths', async () => {
     // Characters JSON writes as `\u00XX`, 6 bytes, the most a character takes; none is blank.
     const sixBytes = Array.from({ length: 31 }, (_, at) => String.fromCharCode(at + 1)).filter(
@@ -585,7 +587,7 @@ describe('tags export files', () => {
         }),
       ]);
     }
-  });
+  }, 30_000);
 
   it('reads the path of any file a computer holds, in NFC, and leaves out longer ones', async () => {
     // A name of 255 units, the most Windows takes, that NFC makes 765 (U+FB2C is 3 in NFC).
