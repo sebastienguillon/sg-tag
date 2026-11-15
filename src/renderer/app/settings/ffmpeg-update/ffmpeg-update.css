@@ -1,0 +1,42 @@
+:host {
+  display: grid;
+  gap: 8px;
+}
+
+.check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.outcome {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

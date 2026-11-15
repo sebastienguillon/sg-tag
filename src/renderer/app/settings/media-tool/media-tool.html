@@ -1,0 +1,13 @@
+@let info = tool();
+
+<div class="summary">
+  @if (info.version; as version) {
+    <span class="version">{{ version }}</span>
+  } @else {
+    <span class="muted">Unknown version</span>
+  }
+  @if (info.bundled) {
+    <span class="muted">Comes with SG Tag, which updates it</span>
+  }
+</div>
+<code>{{ info.path }}</code>

@@ -17,6 +17,8 @@ export interface DesktopBridge {
    * `LibraryApi.planTagImport`.
    */
   readonly openTagImport: () => Promise<TagImportSource | null>;
+  /** The newest FFmpeg release that ffmpeg.org lists, e.g. `9.0.2`; asks ffmpeg.org each time. */
+  readonly latestFfmpegRelease: () => Promise<string>;
 }
 
 export const IpcChannel = {
@@ -28,6 +30,7 @@ export const IpcChannel = {
   trashFile: 'shell:trash-file',
   exportTags: 'tags:export',
   openTagImport: 'tags:open-import',
+  latestFfmpegRelease: 'updates:latest-ffmpeg',
 } as const;
 
 /** `window.postMessage` payload used by the preload script to hand the worker port to the page. */

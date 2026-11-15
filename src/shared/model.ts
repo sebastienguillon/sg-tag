@@ -293,10 +293,21 @@ export interface Settings {
   readonly sidebarWidth: number;
 }
 
+/** ffmpeg or ffprobe, as the indexer found it. */
+export interface MediaToolInfo {
+  readonly path: string;
+  /** As the tool reports it: `7.1.1`, `7.1-full_build-www.gyan.dev`…; `null` if it did not say. */
+  readonly version: string | null;
+  /** Shipped with SG Tag (`resources/bin`): it is updated with the app. */
+  readonly bundled: boolean;
+}
+
 export interface Diagnostics {
   readonly appVersion: string;
-  readonly ffmpeg: string | null;
-  readonly ffprobe: string | null;
+  /** `null` when not found. */
+  readonly ffmpeg: MediaToolInfo | null;
+  /** `null` when not found. */
+  readonly ffprobe: MediaToolInfo | null;
   readonly sqlite: string;
   readonly dataDir: string;
 }

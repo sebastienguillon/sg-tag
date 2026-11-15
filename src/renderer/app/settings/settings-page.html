@@ -131,8 +131,8 @@
         <dd>{{ info.appVersion }}</dd>
         <dt>ffmpeg</dt>
         <dd>
-          @if (info.ffmpeg; as path) {
-            <code>{{ path }}</code>
+          @if (info.ffmpeg; as tool) {
+            <app-media-tool [tool]="tool" />
           } @else {
             <span class="warning">
               Not found. Video thumbnails fall back to the system thumbnailer (macOS, Windows).
@@ -141,12 +141,18 @@
         </dd>
         <dt>ffprobe</dt>
         <dd>
-          @if (info.ffprobe; as path) {
-            <code>{{ path }}</code>
+          @if (info.ffprobe; as tool) {
+            <app-media-tool [tool]="tool" />
           } @else {
             <span class="warning">Not found. Video duration and size are unavailable.</span>
           }
         </dd>
+        <!-- One check for both: they come with the same FFmpeg release. -->
+        @if (!(info.ffmpeg?.bundled && info.ffprobe?.bundled)) {
+          <dd class="ffmpeg-update">
+            <app-ffmpeg-update [ffmpeg]="info.ffmpeg" [ffprobe]="info.ffprobe" />
+          </dd>
+        }
         <dt>SQLite</dt>
         <dd>{{ info.sqlite }}</dd>
       </dl>

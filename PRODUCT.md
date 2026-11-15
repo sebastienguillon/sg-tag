@@ -76,7 +76,10 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 - Zoom: ⌘/Ctrl with `+` or `=`, `-` and `0` (keypad too, on any keyboard layout), Ctrl + mouse wheel
   on Windows and Linux, or the View menu; 50% to 300%, remembered across launches.
 - Settings: library folders (add, remove, file and tagged counts, offline state), tags (data folder,
-  Export tags… and Import tags…), and diagnostics.
+  Export tags… and Import tags…), and diagnostics (versions of the app, ffmpeg, ffprobe and SQLite).
+  One Check for updates covers ffmpeg and ffprobe, which come with the same FFmpeg release: it asks
+  ffmpeg.org for its latest release and links to its download page when that is newer. SG Tag
+  contacts no website otherwise. A tool not found gets a link to install FFmpeg.
 - Tags export and import: a tags export lists every tagged file (missing and offline ones included)
   with its tags, except tags past its limits (length, depth, combining marks in a row, 1,000 per
   file), which it leaves out and counts. It holds up to 256 MiB (about 670,000 tagged files) and

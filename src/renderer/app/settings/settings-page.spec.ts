@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { DesktopBridge } from '@shared/desktop-api';
 import type {
+  Diagnostics,
   IndexStatus,
   LibraryRoot,
   TagExportRecord,
@@ -27,6 +28,13 @@ const videos: LibraryRoot = {
   online: true,
   fileCount: 120,
   taggedCount: 0,
+};
+const diagnostics: Diagnostics = {
+  appVersion: '2026.10.0-alpha.3',
+  ffmpeg: null,
+  ffprobe: null,
+  sqlite: '3.50.0',
+  dataDir: '/Users/seb/Library/Application Support/SG Tag',
 };
 const exported: TagExportResult = {
   path: '/Users/seb/Documents/SG Tag tags 2026-10-19.jsonl',
@@ -68,6 +76,22 @@ describe('SettingsPage', () => {
     element?.textContent.replace(/\s+/g, ' ').trim() ?? '';
   const button = (label: string, within: Element | null = host): HTMLButtonElement | undefined =>
     [...(within?.querySelectorAll('button') ?? [])].find((candidate) => text(candidate) === label);
+  /**
+   * Each term with its description, and descriptions that follow another on their own. A tool found
+   * reads as `<version> at <path>`, the two lines it shows.
+   */
+  const diagnosticsList = (): string[] =>
+    [...host.querySelectorAll('section:last-of-type dl > *')].flatMap((item) => {
+      if (item.tagName === 'DT') {
+        return [];
+      }
+      const tool = item.querySelector('app-media-tool');
+      const description = tool
+        ? `${text(tool.querySelector('.summary'))} at ${text(tool.querySelector('code'))}`
+        : text(item);
+      const term = item.previousElementSibling;
+      return [term?.tagName === 'DT' ? `${text(term)}: ${description}` : description];
+    });
   const askToRemove = async (root: LibraryRoot): Promise<HTMLElement | null> => {
     host.querySelector<HTMLButtonElement>(`[aria-label="Remove ${root.path}"]`)?.click();
     await render();
@@ -78,13 +102,7 @@ describe('SettingsPage', () => {
     worker = new FakeWorkerClient();
     roots = [pictures, videos];
     worker.respond('listRoots', () => roots);
-    worker.respond('getDiagnostics', () => ({
-      appVersion: '2026.10.0-alpha.3',
-      ffmpeg: null,
-      ffprobe: null,
-      sqlite: '3.50.0',
-      dataDir: '/Users/seb/Library/Application Support/SG Tag',
-    }));
+    worker.respond('getDiagnostics', () => diagnostics);
     worker.respond('listTags', () => []);
     lastExport = null;
     worker.respond('getLastTagExport', () => lastExport);
@@ -114,6 +132,32 @@ describe('SettingsPage', () => {
   it('shows the app version first in Diagnostics', () => {
     expect(text(host.querySelector('section:last-of-type dt'))).toBe('Version');
     expect(text(host.querySelector('section:last-of-type dd'))).toBe('2026.10.0-alpha.3');
+  });
+
+  it('shows the version of each tool, and one check for updates to ffmpeg and ffprobe', async () => {
+    worker.respond('getDiagnostics', () => ({
+      ...diagnostics,
+      ffmpeg: { path: '/opt/homebrew/bin/ffmpeg', version: '9.0.2', bundled: false },
+      ffprobe: { path: '/opt/homebrew/bin/ffprobe', version: '9.0.2', bundled: false },
+    }));
+    await mount();
+    expect(diagnosticsList()).toEqual([
+      'Version: 2026.10.0-alpha.3',
+      'ffmpeg: 9.0.2 at /opt/homebrew/bin/ffmpeg',
+      'ffprobe: 9.0.2 at /opt/homebrew/bin/ffprobe',
+      'Check for updates to ffmpeg and ffprobe',
+      'SQLite: 3.50.0',
+    ]);
+  });
+
+  it('offers to install FFmpeg when ffmpeg and ffprobe are not found', () => {
+    expect(diagnosticsList()).toEqual([
+      'Version: 2026.10.0-alpha.3',
+      'ffmpeg: Not found. Video thumbnails fall back to the system thumbnailer (macOS, Windows).',
+      'ffprobe: Not found. Video duration and size are unavailable.',
+      'ffmpeg and ffprobe come with FFmpeg: install it from ffmpeg.org, then restart SG Tag.',
+      'SQLite: 3.50.0',
+    ]);
   });
 
   it('offers to export the tags before removing a folder that has some', async () => {

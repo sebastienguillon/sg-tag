@@ -23,6 +23,7 @@ const bridge: DesktopBridge = {
   exportTags: () => ipcRenderer.invoke(IpcChannel.exportTags) as Promise<TagExportResult | null>,
   openTagImport: () =>
     ipcRenderer.invoke(IpcChannel.openTagImport) as Promise<TagImportSource | null>,
+  latestFfmpegRelease: () => ipcRenderer.invoke(IpcChannel.latestFfmpegRelease) as Promise<string>,
 };
 
 contextBridge.exposeInMainWorld('sgTag', bridge);

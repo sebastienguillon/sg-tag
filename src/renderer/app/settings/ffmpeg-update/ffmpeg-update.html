@@ -1,0 +1,54 @@
+@let tools = checked();
+@let absent = missing();
+@let state = check();
+
+@if (tools.length > 0) {
+  <div class="check">
+    <button
+      type="button"
+      class="button"
+      [attr.aria-disabled]="state.step === 'checking' ? 'true' : null"
+      (click)="checkForUpdates()"
+    >
+      Check for updates to {{ names(tools) }}
+    </button>
+    <!-- Always there, so that screen readers announce what comes into it. -->
+    <span class="outcome" role="status">
+      @if (state.step === 'checking') {
+        <app-icon class="spin" name="loader" /> Checking ffmpeg.org…
+      } @else if (state.step === 'done') {
+        @let outcome = state.outcome;
+        @let one = outcome.tools.length === 1;
+        @if (outcome.comparison === 'current') {
+          {{ names(outcome.tools) }} {{ one ? 'is' : 'are' }} up to date: {{ state.latest }} is the
+          latest FFmpeg release.
+        } @else {
+          @if (outcome.comparison === 'outdated') {
+            {{ names(outcome.tools) }} {{ one ? 'is' : 'are' }} out of date: FFmpeg
+            {{ state.latest }} is available.
+          } @else {
+            <!-- Development builds are numbered after a commit, not a release. -->
+            The latest FFmpeg release is {{ state.latest }}: the {{ names(outcome.tools) }}
+            {{ one ? 'build' : 'builds' }} cannot be compared with it.
+          }
+          <!-- No space before the icon: the link spaces it. -->
+          <a target="_blank" rel="noopener noreferrer" [href]="downloadPage"
+            >Download it from ffmpeg.org<app-icon name="external-link"
+          /></a>
+        }
+      } @else if (state.step === 'error') {
+        <span class="error">{{ state.message }}</span>
+      }
+    </span>
+  </div>
+}
+
+@if (absent.length > 0) {
+  <!-- Found when SG Tag starts: on the PATH, or where package managers install it. -->
+  <p class="install">
+    {{ names(absent) }} {{ absent.length === 1 ? 'comes' : 'come' }} with FFmpeg:
+    <a target="_blank" rel="noopener noreferrer" [href]="downloadPage"
+      >install it from ffmpeg.org<app-icon name="external-link" /></a
+    >, then restart SG Tag.
+  </p>
+}

@@ -1,14 +1,16 @@
 import { IpcChannel } from '@shared/desktop-api';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron';
 import path from 'node:path';
+import { latestFfmpegRelease } from './ffmpeg-release';
 import { exportFileName, exportTags, TAGS_EXPORT_FILTER } from './tag-transfer';
 import { trashFile } from './trash';
 import type { WorkerHost } from './worker-host';
 
 /**
  * Main-process services for the renderer: folder picker, open/reveal/trash files, tags export and
- * import, worker port. A tags export must stay out of `dataDir`, the indexer's data folder.
+ * import, worker port, FFmpeg update check. A tags export must stay out of `dataDir`, the indexer's
+ * data folder.
  */
 export function registerIpc(worker: WorkerHost, trustedOrigin: string, dataDir: string): void {
   const trusted = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => {
@@ -127,5 +129,12 @@ export function registerIpc(worker: WorkerHost, trustedOrigin: string, dataDir: 
     const source = await worker.call('openTagImport', filePath);
     importFile = filePath;
     return source;
+  });
+
+  ipcMain.handle(IpcChannel.latestFfmpegRelease, (event) => {
+    if (!trusted(event)) {
+      throw new Error('Not available to this page.');
+    }
+    return latestFfmpegRelease((url, init) => net.fetch(url, init));
   });
 }
