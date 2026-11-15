@@ -1,15 +1,17 @@
 <section class="editor" [attr.aria-labelledby]="titleId">
   <header class="header">
     <h4 class="title" [id]="titleId">Edit tag</h4>
-    <button
-      type="button"
-      class="icon-button"
-      aria-label="Close tag editor"
-      title="Close"
-      (click)="close()"
-    >
-      <app-icon name="x" />
-    </button>
+    @if (closable()) {
+      <button
+        type="button"
+        class="icon-button"
+        aria-label="Close tag editor"
+        title="Close"
+        (click)="close()"
+      >
+        <app-icon name="x" />
+      </button>
+    }
   </header>
 
   @if (gone()) {

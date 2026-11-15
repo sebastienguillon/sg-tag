@@ -1947,9 +1947,25 @@ describe('TagsRepository.mergePreview', () => {
       // Missing files are counted: they carry the tag all the same.
       filesMoved: 2,
       filesWithBoth: 1,
+      aliases: [],
+      parents: 0,
+      children: 0,
       refusal: null,
     });
     expect(storedRows(db)).toEqual(before);
+  });
+
+  it('says what becomes of the aliases, parent tags and child tags of the tag that goes', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    addTag('Paname', { aliases: ['Lutèce', 'Lutetia'], parents: ['France', 'Paris'] });
+    addTag('Montmartre', { parents: ['Paname'] });
+
+    // Paris, the tag kept, is not counted: the merge drops the link between the two.
+    expect(tags.mergePreview(idOf(tags, 'Paname'), idOf(tags, 'Paris'))).toMatchObject({
+      aliases: ['Lutèce', 'Lutetia'],
+      parents: 1,
+      children: 1,
+    });
   });
 
   it('says why a merge would be refused, as the merge would', () => {
@@ -1964,5 +1980,39 @@ describe('TagsRepository.mergePreview', () => {
     // The same tag twice, or a tag gone: nothing to preview.
     expect(tags.mergePreview(paris, paris)).toBeNull();
     expect(tags.mergePreview(paris, 9_999)).toBeNull();
+  });
+});
+
+describe('TagsRepository.list', () => {
+  it('keeps listing tags in the order of their names as they are made, renamed, merged and deleted', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    const names = (): string[] => tags.list().map((tag) => tag.name);
+    const parentNames = (name: string): string[] => {
+      const list = tags.list();
+      const byId = new Map(list.map((tag) => [tag.id, tag.name]));
+      return (list.find((tag) => tag.name === name)?.parentIds ?? []).map(
+        (id) => byId.get(id) ?? '',
+      );
+    };
+    addTag('Lyon');
+    addTag('Paris', { parents: ['France', 'Europe'] });
+    expect(names()).toEqual(['Europe', 'France', 'Lyon', 'Paris']);
+    expect(parentNames('Paris')).toEqual(['Europe', 'France']);
+
+    // Renamed: in its new place, among the tags and among the parents of a tag.
+    editedTag(tags.renameTag(idOf(tags, 'Europe'), 'Union', false));
+    expect(names()).toEqual(['France', 'Lyon', 'Paris', 'Union']);
+    expect(parentNames('Paris')).toEqual(['France', 'Union']);
+    // A change of letter case only, then a new tag.
+    editedTag(tags.renameTag(idOf(tags, 'Lyon'), 'lyon', false));
+    addTag('Marseille');
+    expect(names()).toEqual(['France', 'lyon', 'Marseille', 'Paris', 'Union']);
+    // Merged and deleted.
+    editedTag(tags.mergeTags(idOf(tags, 'Marseille'), idOf(tags, 'Union')));
+    expect(tags.deleteTag(idOf(tags, 'lyon'))).toEqual({ ok: true });
+    expect(names()).toEqual(['France', 'Paris', 'Union']);
+    // Swapped with an alias: the alias becomes the name.
+    editedTag(tags.renameTag(idOf(tags, 'Union'), 'Marseille', false));
+    expect(names()).toEqual(['France', 'Marseille', 'Paris']);
   });
 });

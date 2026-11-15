@@ -282,6 +282,35 @@ describe('TagsStore.resolve', () => {
   });
 });
 
+describe('TagsStore.holding', () => {
+  it('finds the tags whose name or an alias holds the text, as a search compares them', async () => {
+    const store = await storeOf([
+      tag(1, 'Paris', 4, { aliases: ['Paname'] }),
+      tag(2, 'Panama'),
+      tag(3, 'Été'),
+      tag(4, 'Lyon'),
+    ]);
+
+    expect(store.holding('ANA')).toEqual(new Set([1, 2]));
+    expect(store.holding(' ete ')).toEqual(new Set([3]));
+    expect(store.holding('Tokyo')).toEqual(new Set());
+  });
+
+  it('keeps every tag while nothing but spaces or accents is typed', async () => {
+    const store = await storeOf([tag(1, 'Paris')]);
+
+    expect(store.holding('')).toBeNull();
+    expect(store.holding('   ')).toBeNull();
+    expect(store.holding(String.fromCodePoint(0x301))).toBeNull();
+  });
+
+  it('finds no tag for a text longer than a name can be', async () => {
+    const store = await storeOf([tag(1, 'a'.repeat(10))]);
+
+    expect(store.holding('a'.repeat(1_025))).toEqual(new Set());
+  });
+});
+
 describe('TagsStore.above and TagsStore.below', () => {
   /** Europe › France › Île-de-France › Paris, and Lyon below France; Paris is a capital too. */
   const LIBRARY = [

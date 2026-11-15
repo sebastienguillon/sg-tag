@@ -179,6 +179,28 @@ export class TagsStore {
   }
 
   /**
+   * The ids of the tags whose name or one of whose aliases holds `text`, compared as `suggest`
+   * compares them (`tagFold`); `null` when every tag does: nothing typed, or accents alone. No tag
+   * holds a text longer than a name can be.
+   */
+  holding(text: string): ReadonlySet<number> | null {
+    if (text.length > MAX_TAG_NAME_LENGTH) {
+      return new Set();
+    }
+    const fold = tagFold(tagNameText(text));
+    if (fold === '') {
+      return null;
+    }
+    const ids = new Set<number>();
+    for (const name of this.names()) {
+      if (name.fold.includes(fold)) {
+        ids.add(name.tag.id);
+      }
+    }
+    return ids;
+  }
+
+  /**
    * The tag that `text` names, as the tag input takes it: the tag whose name or alias it is, letter
    * case and characters nobody sees aside (`tagKey`); else the one tag whose name or alias it is
    * without accents too (`tagFold`), so that `Egypte` is `Égypte`; else none, and `text` would make

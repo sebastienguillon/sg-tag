@@ -7,7 +7,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { createLogger } from '@shared/log';
 import type { SortField } from '@shared/model';
 import { DEFAULT_SETTINGS, SIDEBAR_WIDTH, TILE_SIZE } from '@shared/model';
@@ -43,7 +43,6 @@ export class BrowserPage {
   private readonly preferences = inject(PreferencesStore);
   private readonly worker = inject(WorkerClient);
   private readonly desktop = inject(DESKTOP);
-  private readonly router = inject(Router);
 
   private readonly searchBar = viewChild.required(SearchBar);
   private readonly grid = viewChild(FileGrid);
@@ -160,12 +159,10 @@ export class BrowserPage {
 
   protected onGlobalKeydown(event: KeyboardEvent): void {
     const modifier = this.isMac ? event.metaKey : event.ctrlKey;
+    // ⌘/Ctrl-comma and ⌘/Ctrl-Shift-T are the app's (`App`): they work from every page.
     if (modifier && event.key === 'f') {
       event.preventDefault();
       this.searchBar().focus();
-    } else if (modifier && event.key === ',') {
-      event.preventDefault();
-      void this.router.navigate(['/settings']);
     } else if (event.key === '/' && !isEditable(event.target)) {
       event.preventDefault();
       this.searchBar().focus();

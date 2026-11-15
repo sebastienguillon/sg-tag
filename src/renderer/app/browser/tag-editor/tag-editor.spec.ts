@@ -274,6 +274,9 @@ describe('TagEditor', () => {
       into: ref(into === PARIS.id ? PARIS : LYON),
       filesMoved: 12,
       filesWithBoth: 3,
+      aliases: [],
+      parents: 1,
+      children: 0,
       refusal: null,
     }));
     worker.respond('mergeTags', () => ok(PARIS));
@@ -510,11 +513,15 @@ describe('TagEditor', () => {
   });
 
   it('merges the tag into another once confirmed, and shows the tag kept', async () => {
+    // As the worker read them for the preview: the list of tags does not have Lutèce yet.
     worker.respond('getMergePreview', () => ({
       from: ref(PARIS),
       into: ref(LYON),
       filesMoved: 1,
       filesWithBoth: 0,
+      aliases: ['Lutèce', 'Paname'],
+      parents: 1,
+      children: 1,
       refusal: null,
     }));
     worker.respond('mergeTags', () => ok(LYON));
@@ -536,7 +543,7 @@ describe('TagEditor', () => {
     expect(field('Tag to merge into')).toBeNull();
     expect(worker.callsTo('getMergePreview')).toEqual([[PARIS.id, LYON.id]]);
     expect(confirmation()?.querySelector('p')?.textContent).toBe(
-      'Merge “Paris” into “Lyon”? 1 file gains Lyon. Paris and its aliases become aliases of Lyon, and its parent and child tags become those of Lyon. This cannot be undone.',
+      'Merge “Paris” into “Lyon”? 1 file gains Lyon. Paris and its aliases Lutèce and Paname become aliases of Lyon, and its parent and child tags become those of Lyon. This cannot be undone.',
     );
     expect(document.activeElement).toBe(button('Cancel'));
 
@@ -548,6 +555,26 @@ describe('TagEditor', () => {
     expect(confirmation()).toBeNull();
     expect(document.activeElement).toBe(nameField());
     expect(closed).toBe(0);
+  });
+
+  it('asks to confirm a merge with what the worker read for it, not with the list of tags', async () => {
+    // The list of tags still gives Paris an alias, a parent tag and a child tag.
+    worker.respond('getMergePreview', (): TagMergePreview => ({
+      from: ref(PARIS),
+      into: ref(LYON),
+      filesMoved: 0,
+      filesWithBoth: 0,
+      aliases: [],
+      parents: 0,
+      children: 0,
+      refusal: null,
+    }));
+    await click(button('Merge into…'));
+    await type(field('Tag to merge into'), 'Lyon');
+    await press(field('Tag to merge into'), 'Enter');
+    expect(confirmation()?.querySelector('p')?.textContent).toBe(
+      'Merge “Paris” into “Lyon”? No file gains Lyon. Paris becomes an alias of Lyon. This cannot be undone.',
+    );
   });
 
   it('says why a merge would be refused, and offers only to cancel', async () => {
@@ -562,6 +589,9 @@ describe('TagEditor', () => {
       into: ref(FRANCE),
       filesMoved: 12,
       filesWithBoth: 0,
+      aliases: ['Paname'],
+      parents: 1,
+      children: 1,
       refusal,
     }));
     await click(button('Merge into…'));
@@ -607,5 +637,29 @@ describe('TagEditor', () => {
     expect(nameField().value).toBe('Lyon');
     expect(host.querySelector('.counts')?.textContent).toBe('3 files');
     expect(document.activeElement).toBe(nameField());
+  });
+
+  it('leaves the focus where it is when another tag is shown, unless asked, when told to', async () => {
+    const elsewhere = document.createElement('button');
+    document.body.append(elsewhere);
+    fixture.componentRef.setInput('focusOnShow', false);
+    fixture.componentRef.setInput('closable', false);
+    elsewhere.focus();
+    fixture.componentRef.setInput('tagId', LYON.id);
+    await render();
+    expect(nameField().value).toBe('Lyon');
+    expect(document.activeElement).toBe(elsewhere);
+    // Nothing to close: the host keeps it open.
+    expect(host.querySelector('[aria-label="Close tag editor"]')).toBeNull();
+
+    fixture.componentInstance.focus();
+    await render();
+    expect(document.activeElement).toBe(nameField());
+
+    elsewhere.focus();
+    fixture.componentRef.setInput('tagId', PARIS.id);
+    await render();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
   });
 });

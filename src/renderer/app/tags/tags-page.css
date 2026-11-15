@@ -1,0 +1,249 @@
+:host {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--toolbar-height);
+  padding: 0 12px 0 calc(12px + var(--titlebar-inset));
+  border-bottom: 1px solid var(--border);
+  background: var(--chrome-bg);
+  -webkit-app-region: drag;
+}
+
+.toolbar a {
+  -webkit-app-region: no-drag;
+}
+
+h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+  min-height: 0;
+}
+
+.list-pane {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+
+.editor-pane {
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--surface);
+}
+
+/* The editor goes below the list, which keeps a good part of the window. */
+@media (width < 800px) {
+  .page {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .list-pane {
+    height: max(240px, 55vh);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .editor-pane {
+    overflow-y: visible;
+  }
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 12px 8px;
+}
+
+.field {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--field-bg);
+  color: var(--text-muted);
+}
+
+.field:focus-within,
+.text-field:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-halo);
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.toggle {
+  flex: none;
+}
+
+.toggle[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--chip-bg);
+  color: var(--chip-text);
+}
+
+.toggle[aria-pressed='true']:hover {
+  background: var(--chip-bg);
+}
+
+.list-header {
+  display: grid;
+  gap: 6px;
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.header-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.count {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.text-field {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  outline: none;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+/* May quote what was typed, which can be one long word. */
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.offer {
+  justify-self: start;
+}
+
+.list {
+  height: 100%;
+  outline: none;
+}
+
+.list:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+/*
+ * Its height must equal the virtual scroll's item size (`ROW_HEIGHT`). The rows hold the width of
+ * the list whatever their text: the box that scrolls them takes the width of its widest row, and a
+ * long name would scroll the list sideways.
+ */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 32px;
+  padding: 0 12px;
+  white-space: nowrap;
+  contain: inline-size;
+}
+
+.row:hover {
+  background: var(--hover);
+}
+
+.row.selected {
+  background: var(--chip-bg);
+  color: var(--chip-text);
+}
+
+.name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.parents {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.parents,
+.files,
+.below {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.row.selected .parents,
+.row.selected .files,
+.row.selected .below {
+  color: inherit;
+}
+
+.files,
+.below {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.files {
+  min-width: 72px;
+}
+
+.below {
+  min-width: 104px;
+}
+
+.none {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.none p {
+  margin: 0;
+}

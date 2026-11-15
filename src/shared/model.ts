@@ -105,6 +105,12 @@ export interface TagMergePreview {
   readonly filesMoved: number;
   /** Files that carry both: they keep `into`, once. */
   readonly filesWithBoth: number;
+  /** The aliases of `from`, sorted by name: with its name, they become aliases of `into`. */
+  readonly aliases: readonly string[];
+  /** Parent tags of `from`, other than `into`: they become parent tags of `into`. */
+  readonly parents: number;
+  /** Child tags of `from`, other than `into`: they become child tags of `into`. */
+  readonly children: number;
   /** Why the merge would be refused (`loop` or `limit`); `null` when it would be made. */
   readonly refusal: TagEditError | null;
 }
