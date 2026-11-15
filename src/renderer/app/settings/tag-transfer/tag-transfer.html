@@ -5,6 +5,7 @@
 @let tags = tagCount();
 @let nothingToExport = noTag();
 @let removing = store.removingFolder();
+@let tagStudio = fromTagStudio();
 
 <p class="lead">
   Tags are kept only in SG Tag’s data folder, never in your files: that folder holds their only
@@ -51,9 +52,18 @@
     type="button"
     class="button"
     [attr.aria-disabled]="store.busy() ? 'true' : null"
-    (click)="open()"
+    (click)="open('tags')"
   >
     Import tags…
+  </button>
+  <button
+    #tagStudioButton
+    type="button"
+    class="button"
+    [attr.aria-disabled]="store.busy() ? 'true' : null"
+    (click)="open('tagStudio')"
+  >
+    Import from TagStudio…
   </button>
 </div>
 @if (nothingToExport) {
@@ -137,7 +147,11 @@
     <app-icon class="spin" name="loader" />
     <span role="status">
       @if (importState.step === 'opening') {
-        Reading the tags export…
+        @if (tagStudio) {
+          Reading the TagStudio library…
+        } @else {
+          Reading the tags export…
+        }
         @if (progress?.step === 'reading' && progress.total > 0) {
           {{ progress.done / progress.total | percent }}
         }
@@ -156,12 +170,12 @@
         }
       } @else if (importState.source.files === 0) {
         <!-- It only describes tags: no file to look for. -->
-        Checking the tags of the tags export…
+        Checking the tags of the {{ tagStudio ? 'TagStudio library' : 'tags export' }}…
       } @else {
         Looking for the {{ importState.source.files | number }} file{{
           importState.source.files === 1 ? '' : 's'
         }}
-        of the tags export…
+        of the {{ tagStudio ? 'TagStudio library' : 'tags export' }}…
         @if (progress?.step === 'matching' && progress.total > 0) {
           {{ progress.done | number }} done
         }
@@ -189,7 +203,16 @@
         Nothing was added.
       }
     </p>
-    @if (result.notFound > 0) {
+    @if (result.notFound > 0 && tagStudio) {
+      <!-- Some may be files SG Tag does not index: adding folders would not find those. -->
+      <p>
+        {{ result.notFound | number }} file{{ result.notFound === 1 ? '' : 's' }} of the TagStudio
+        library {{ result.notFound === 1 ? 'was' : 'were' }} not found, or
+        {{ result.notFound === 1 ? 'is not an image or a video' : 'are not images or videos' }}, so
+        {{ result.notFound === 1 ? 'its' : 'their' }} tags were not imported. Import from TagStudio
+        again once the files are in your library folders: tags already imported are skipped.
+      </p>
+    } @else if (result.notFound > 0) {
       <p>
         {{ result.notFound | number }} file{{ result.notFound === 1 ? '' : 's' }} of the tags export
         {{ result.notFound === 1 ? 'was' : 'were' }} not found, so
@@ -202,7 +225,7 @@
       <p>
         {{ result.skipped | number }} file{{ result.skipped === 1 ? '' : 's' }} changed or left the
         library during the import and {{ result.skipped === 1 ? 'was' : 'were' }} left out: import
-        the tags export again to include them.
+        {{ tagStudio ? 'from TagStudio' : 'the tags export' }} again to include them.
       </p>
     }
   </div>

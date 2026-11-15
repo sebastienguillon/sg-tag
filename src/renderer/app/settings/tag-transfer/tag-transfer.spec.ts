@@ -31,6 +31,7 @@ const tag = (id: number, name: string): Tag => ({
 
 const source: TagImportSource = {
   token: 'token-1',
+  kind: 'tags',
   name: 'SG Tag tags 2026-10-12.jsonl',
   exportedAt: '2026-10-12T12:00:00.000Z',
   platform: 'darwin',
@@ -38,6 +39,7 @@ const source: TagImportSource = {
   tags: 87,
   invalid: 0,
   problems: [],
+  tagStudio: null,
 };
 
 /** A tags export that describes no tag, or one whose tags are all here as it describes them. */
@@ -58,7 +60,7 @@ const preview: TagImportPreview = {
   planId: 1,
   found: { samePlace: 4_980, moved: 110, shared: 3 },
   changed: 9,
-  notFound: { missing: 40, uncompared: 8, folder: 60, notFound: 4 },
+  notFound: { missing: 40, uncompared: 8, folder: 60, ambiguous: 0, notMedia: 0, notFound: 4 },
   folders: [
     {
       exported: '/Users/seb/Pictures',
@@ -92,7 +94,7 @@ const restore: TagImportPreview = {
   ...preview,
   found: { samePlace: 5_214, moved: 0, shared: 0 },
   changed: 0,
-  notFound: { missing: 0, uncompared: 0, folder: 0, notFound: 0 },
+  notFound: { missing: 0, uncompared: 0, folder: 0, ambiguous: 0, notMedia: 0, notFound: 0 },
   folders: [preview.folders[0]!],
   movedItems: [],
   changedItems: [],
@@ -164,6 +166,7 @@ describe('TagTransfer', () => {
   let lastExport: TagExportRecord | null;
   let exportTags: DesktopBridge['exportTags'];
   let openTagImport: DesktopBridge['openTagImport'];
+  let openTagStudioImport: DesktopBridge['openTagStudioImport'];
 
   const render = async (): Promise<void> => {
     await settle();
@@ -211,6 +214,7 @@ describe('TagTransfer', () => {
     worker.respond('closeTagImport', () => undefined);
     exportTags = () => Promise.resolve(null);
     openTagImport = () => Promise.resolve(null);
+    openTagStudioImport = () => Promise.resolve(null);
     TestBed.configureTestingModule({
       providers: [
         { provide: WorkerClient, useValue: worker },
@@ -220,6 +224,7 @@ describe('TagTransfer', () => {
             ...fakeDesktop,
             exportTags: () => exportTags(),
             openTagImport: () => openTagImport(),
+            openTagStudioImport: () => openTagStudioImport(),
           },
         },
       ],
@@ -668,18 +673,37 @@ describe('TagTransfer', () => {
     expect(text(host.querySelector('.summary'))).toBe(
       'Nothing to add: the files found already have all these tags.',
     );
-    expect(labels()).toEqual(['Export tags…', 'Import tags…', 'Check again', 'Close']);
+    expect(labels()).toEqual([
+      'Export tags…',
+      'Import tags…',
+      'Import from TagStudio…',
+      'Check again',
+      'Close',
+    ]);
     expect(document.activeElement).toBe(button('Close'));
 
     await openPreview({
       ...nothingToAdd,
       found: { samePlace: 0, moved: 0, shared: 0 },
-      notFound: { missing: 0, uncompared: 0, folder: 5_214, notFound: 0 },
+      notFound: {
+        missing: 0,
+        uncompared: 0,
+        folder: 5_214,
+        ambiguous: 0,
+        notMedia: 0,
+        notFound: 0,
+      },
     });
     expect(text(host.querySelector('.summary'))).toBe(
       'None of these files were found in your library folders. Add the folders that hold them, here or in Library folders, then check again.',
     );
-    expect(labels()).toEqual(['Export tags…', 'Import tags…', 'Check again', 'Close']);
+    expect(labels()).toEqual([
+      'Export tags…',
+      'Import tags…',
+      'Import from TagStudio…',
+      'Check again',
+      'Close',
+    ]);
 
     button('Close')?.click();
     await render();
@@ -796,6 +820,7 @@ describe('TagTransfer', () => {
     expect(labels()).toEqual([
       'Export tags…',
       'Import tags…',
+      'Import from TagStudio…',
       'Check again',
       'Cancel',
       'Import tags',
@@ -836,7 +861,14 @@ describe('TagTransfer', () => {
     await openPreview({
       ...aliasesOnly,
       found: { samePlace: 0, moved: 0, shared: 0 },
-      notFound: { missing: 0, uncompared: 0, folder: 5_214, notFound: 0 },
+      notFound: {
+        missing: 0,
+        uncompared: 0,
+        folder: 5_214,
+        ambiguous: 0,
+        notMedia: 0,
+        notFound: 0,
+      },
       definitions: { ...noDefinitions, aliases: 1 },
     });
     expect(text(host.querySelector('.summary'))).toBe(
@@ -845,6 +877,7 @@ describe('TagTransfer', () => {
     expect(labels()).toEqual([
       'Export tags…',
       'Import tags…',
+      'Import from TagStudio…',
       'Check again',
       'Cancel',
       'Import tags',
@@ -863,7 +896,13 @@ describe('TagTransfer', () => {
     expect(text(host.querySelector('.summary'))).toBe(
       'Nothing to add: these tags are already here, with their aliases and parent tags.',
     );
-    expect(labels()).toEqual(['Export tags…', 'Import tags…', 'Check again', 'Close']);
+    expect(labels()).toEqual([
+      'Export tags…',
+      'Import tags…',
+      'Import from TagStudio…',
+      'Check again',
+      'Close',
+    ]);
     expect(host.querySelector('app-tag-import-preview h4')).toBeNull();
 
     await openPreview(
@@ -876,7 +915,13 @@ describe('TagTransfer', () => {
     expect(text(host.querySelector('.summary'))).toBe(
       'Nothing to add: the aliases and parent tags not here yet are left out.',
     );
-    expect(labels()).toEqual(['Export tags…', 'Import tags…', 'Check again', 'Close']);
+    expect(labels()).toEqual([
+      'Export tags…',
+      'Import tags…',
+      'Import from TagStudio…',
+      'Check again',
+      'Close',
+    ]);
   });
 
   it('adds a library folder, starting nothing else meanwhile, then checks again', async () => {
@@ -1285,7 +1330,7 @@ describe('TagTransfer', () => {
       ...preview,
       found: { ...preview.found, moved: 1 },
       changed: 1,
-      notFound: { missing: 0, uncompared: 0, folder: 1, notFound: 0 },
+      notFound: { missing: 0, uncompared: 0, folder: 1, ambiguous: 0, notMedia: 0, notFound: 0 },
     });
     expect(host.querySelector('.more')).toBeNull();
   });
@@ -1314,5 +1359,150 @@ describe('TagTransfer', () => {
     button('Import tags')?.click();
     await render();
     expect(worker.callsTo('applyTagImport')).toEqual([['token-1', 2, true]]);
+  });
+  describe('from TagStudio', () => {
+    const library: TagImportSource = {
+      token: 'token-ts',
+      kind: 'tagStudio',
+      name: '/Users/seb/Pictures/Drama',
+      exportedAt: '2026-11-15T12:00:00.000Z',
+      platform: null,
+      files: 2_964,
+      tags: 296,
+      invalid: 0,
+      problems: [],
+      tagStudio: {
+        version: 102,
+        renamed: 1,
+        renamedItems: [
+          {
+            from: 'Diversity, Equity, and Inclusion',
+            to: 'Diversity Equity and Inclusion',
+            why: 'characters',
+          },
+        ],
+        leftOut: {
+          colors: 5,
+          icons: 0,
+          categories: 0,
+          hidden: 0,
+          fields: 0,
+          builtIn: 3,
+          broken: 0,
+          otherFolders: 0,
+        },
+      },
+    };
+    const libraryPreview: TagImportPreview = {
+      ...restore,
+      planId: 7,
+      found: { samePlace: 2_587, moved: 330, shared: 0 },
+      notFound: { missing: 0, uncompared: 0, folder: 0, ambiguous: 6, notMedia: 37, notFound: 4 },
+      folders: [
+        {
+          exported: '/Users/seb/Pictures/Drama',
+          files: 2_964,
+          found: 2_917,
+          foundIn: ['/Users/seb/Pictures/Drama'],
+          inLibrary: true,
+          suspicious: false,
+          addable: false,
+        },
+      ],
+      movedItems: [
+        {
+          exported: '/Users/seb/Pictures/Drama/Old/a.mp4',
+          current: '/Users/seb/Pictures/Drama/New/a.mp4',
+        },
+      ],
+      missedItems: [
+        { exported: '/Users/seb/Pictures/Drama/One/b.jpg', reason: 'ambiguous' },
+        { exported: '/Users/seb/Pictures/Drama/notes.pdf', reason: 'notMedia' },
+      ],
+      additions: { assignments: 4_780, files: 2_914, newTags: 0 },
+      additionsWithChanged: { assignments: 4_780, files: 2_914, newTags: 0 },
+      definitions: { ...noDefinitions, created: 296, aliases: 61, links: 43 },
+    };
+
+    const openLibrary = async (): Promise<void> => {
+      openTagStudioImport = () => Promise.resolve(library);
+      worker.respond('planTagImport', () => libraryPreview);
+      button('Import from TagStudio…')?.focus();
+      button('Import from TagStudio…')?.click();
+      await render();
+    };
+
+    it('previews a TagStudio library in its own words', async () => {
+      await openLibrary();
+
+      const shown = host.querySelector('app-tag-import-preview');
+      expect(worker.callsTo('planTagImport')).toEqual([['token-ts']]);
+      expect(text(shown?.querySelector('h3'))).toBe(
+        'Import tags from the TagStudio library “/Users/seb/Pictures/Drama”?',
+      );
+      expect(text(shown?.querySelector('.about'))).toBe(
+        'Last changed on November 15, 2026 · 2,964 tagged files · 296 tags',
+      );
+      const shownText = text(shown);
+      expect(shownText).toContain(
+        '330 moved since TagStudio last saw them, recognised by their name',
+      );
+      expect(shownText).toContain(
+        '6 are no longer at their place, and several files have their name',
+      );
+      expect(shownText).toContain('37 are not images or videos, which SG Tag does not index');
+      expect(shownText).toContain(
+        '/Users/seb/Pictures/Drama/One/b.jpg several files have this name',
+      );
+      expect(shownText).toContain('/Users/seb/Pictures/Drama/notes.pdf not an image or a video');
+      expect(shownText).toContain(
+        'Diversity, Equity, and Inclusion → Diversity Equity and Inclusion · a comma, a double quote, a leading = or a control character',
+      );
+      expect(
+        [...(shown?.querySelectorAll('[aria-label="Not carried over"] li') ?? [])].map((item) =>
+          text(item),
+        ),
+      ).toEqual(['The colours of 5 tags', '3 built-in tags of TagStudio not in use, or Meta Tags']);
+      expect(text(shown?.querySelector('.summary'))).toBe(
+        'Importing adds 4,780 tags to 2,914 files, creates 296 new tags, and adds 61 aliases and 43 parent tags.',
+      );
+    });
+
+    it('gives the focus back to Import from TagStudio… when the preview is closed', async () => {
+      await openLibrary();
+
+      button('Cancel')?.click();
+      await render();
+
+      expect(host.querySelector('app-tag-import-preview')).toBeNull();
+      expect(document.activeElement).toBe(button('Import from TagStudio…'));
+      expect(worker.callsTo('closeTagImport')).toHaveLength(1);
+    });
+
+    it('says what was imported, and why some files were not', async () => {
+      worker.respond('applyTagImport', () => ({ ...result, skipped: 0, notFound: 47 }));
+      await openLibrary();
+
+      button('Import tags')?.click();
+      await render();
+
+      expect(worker.callsTo('applyTagImport')).toEqual([['token-ts', 7, true]]);
+      expect(text(host.querySelector('.outcome'))).toContain(
+        '47 files of the TagStudio library were not found, or are not images or videos, so their tags were not imported. Import from TagStudio again once the files are in your library folders: tags already imported are skipped.',
+      );
+      expect(document.activeElement).toBe(button('Import from TagStudio…'));
+    });
+
+    it('says it is reading the TagStudio library', async () => {
+      const opening = Promise.withResolvers<TagImportSource | null>();
+      openTagStudioImport = () => opening.promise;
+      button('Import from TagStudio…')?.click();
+      await render();
+      await progress({ step: 'reading', done: 1, total: 4 });
+
+      expect(text(host.querySelector('[role="status"]'))).toBe(
+        'Reading the TagStudio library… 25%',
+      );
+    });
   });
 });

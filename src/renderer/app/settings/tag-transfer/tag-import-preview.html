@@ -1,10 +1,20 @@
 @let file = source();
 @let plan = preview();
 @let defs = plan.definitions;
+@let studio = tagStudio();
 
-<h3 [id]="headingId">Import tags from “{{ file.name }}”?</h3>
+@if (studio) {
+  <h3 [id]="headingId">Import tags from the TagStudio library “{{ file.name }}”?</h3>
+} @else {
+  <h3 [id]="headingId">Import tags from “{{ file.name }}”?</h3>
+}
 <p class="about">
-  @if (exportedAt(); as at) {
+  @if (studio) {
+    <!-- When its database was last saved. -->
+    @if (exportedAt(); as at) {
+      Last changed on {{ at | date: 'longDate' }} ·
+    }
+  } @else if (exportedAt(); as at) {
     Exported on {{ at | date: 'longDate' }}
     @if (exportedFrom(); as computer) {
       from {{ computer }}
@@ -26,18 +36,27 @@
 } @else {
   <!-- Nothing about files to say: the files paragraphs below have nothing to count. -->
   <p>
-    This tags export lists no file, only tags with their aliases and parent tags. No tag is removed
-    or renamed.
+    This {{ studio ? 'TagStudio library has no tagged file' : 'tags export lists no file' }}, only
+    tags with their aliases and parent tags. No tag is removed or renamed.
   </p>
 }
 @if (file.invalid > 0) {
   <p>
-    {{ file.invalid | number }} line{{ file.invalid === 1 ? '' : 's' }} of the tags export could not
-    be read in full: what could not be read is left out.
+    {{ file.invalid | number }}
+    @if (studio) {
+      file{{ file.invalid === 1 ? '' : 's' }} of the TagStudio library
+    } @else {
+      line{{ file.invalid === 1 ? '' : 's' }} of the tags export
+    }
+    could not be read in full: what could not be read is left out.
   </p>
   <details>
     <summary>Why</summary>
-    <ul class="paths" tabindex="0" aria-label="Lines not read in full">
+    <ul
+      class="paths"
+      tabindex="0"
+      [attr.aria-label]="studio ? 'Files not read in full' : 'Lines not read in full'"
+    >
       @for (problem of file.problems; track $index) {
         <li>{{ problem }}</li>
       }
@@ -56,8 +75,14 @@
     }
     @if (plan.found.moved > 0) {
       <li>
-        {{ plan.found.moved | number }} renamed or moved since the export, recognised by
-        {{ plan.found.moved === 1 ? 'its' : 'their' }} content
+        @if (studio) {
+          {{ plan.found.moved | number }} moved since TagStudio last saw
+          {{ plan.found.moved === 1 ? 'it' : 'them' }}, recognised by
+          {{ plan.found.moved === 1 ? 'its' : 'their' }} name
+        } @else {
+          {{ plan.found.moved | number }} renamed or moved since the export, recognised by
+          {{ plan.found.moved === 1 ? 'its' : 'their' }} content
+        }
         <details>
           <summary>Show<span class="visually-hidden"> the files renamed or moved</span></summary>
           <ul class="paths" tabindex="0" aria-label="Files renamed or moved">
@@ -77,10 +102,15 @@
     }
     @if (plan.found.shared > 0) {
       <li>
-        {{ plan.found.shared | number }} identical
-        {{ plan.found.shared === 1 ? 'copy' : 'copies' }} in the export
-        {{ plan.found.shared === 1 ? 'was' : 'were' }} found as one file here, which gets the tags
-        of each
+        @if (studio) {
+          {{ plan.found.shared | number }} files of the TagStudio library, whose names this computer
+          takes as one, were found as one file here, which gets the tags of each
+        } @else {
+          {{ plan.found.shared | number }} identical
+          {{ plan.found.shared === 1 ? 'copy' : 'copies' }} in the export
+          {{ plan.found.shared === 1 ? 'was' : 'were' }} found as one file here, which gets the tags
+          of each
+        }
       </li>
     }
   </ul>
@@ -133,8 +163,28 @@
     }
     @if (plan.notFound.folder > 0) {
       <li>
-        {{ plan.notFound.folder | number }} {{ plan.notFound.folder === 1 ? 'was' : 'were' }} in a
-        library folder that is not in this library
+        @if (studio) {
+          {{ plan.notFound.folder | number }} {{ plan.notFound.folder === 1 ? 'is' : 'are' }}
+          outside your library folders
+        } @else {
+          {{ plan.notFound.folder | number }} {{ plan.notFound.folder === 1 ? 'was' : 'were' }} in a
+          library folder that is not in this library
+        }
+      </li>
+    }
+    @if (plan.notFound.ambiguous > 0) {
+      <li>
+        {{ plan.notFound.ambiguous | number }}
+        {{ plan.notFound.ambiguous === 1 ? 'is no longer at its' : 'are no longer at their' }}
+        place, and several files have {{ plan.notFound.ambiguous === 1 ? 'its' : 'their' }} name
+      </li>
+    }
+    @if (plan.notFound.notMedia > 0) {
+      <li>
+        {{ plan.notFound.notMedia | number }}
+        {{
+          plan.notFound.notMedia === 1 ? 'is not an image or a video' : 'are not images or videos'
+        }}, which SG Tag does not index
       </li>
     }
     @if (plan.notFound.notFound > 0) {
@@ -149,7 +199,7 @@
     <ul class="paths" tabindex="0" aria-label="Files not found">
       @for (item of plan.missedItems; track $index) {
         <li>
-          {{ item.exported }} <span class="reason">{{ reasonLabels[item.reason] }}</span>
+          {{ item.exported }} <span class="reason">{{ reasonLabels()[item.reason] }}</span>
         </li>
       }
       @if (notFound() > plan.missedItems.length) {
@@ -160,7 +210,7 @@
 }
 
 @if (showFolders()) {
-  <h4>Library folders in the tags export</h4>
+  <h4>{{ studio ? 'Folder of the TagStudio library' : 'Library folders in the tags export' }}</h4>
   <ul class="folders">
     @for (folder of plan.folders; track $index) {
       <li class="folder">
@@ -314,6 +364,56 @@
             }
           </ul>
         </details>
+      </li>
+    }
+  </ul>
+}
+
+@if (studio && (studio.renamed > 0 || leftOut().length > 0)) {
+  <h4>From TagStudio</h4>
+  <ul class="counts">
+    @if (studio.renamed > 0) {
+      <li>
+        {{ studio.renamed | number }} name{{ studio.renamed === 1 ? '' : 's' }} of tags or aliases
+        written otherwise, or left out
+        <details>
+          <summary>Show<span class="visually-hidden"> the names written otherwise</span></summary>
+          <ul class="paths names" tabindex="0" aria-label="Names written otherwise">
+            @for (item of studio.renamedItems; track $index) {
+              <li>
+                @if (item.to === null) {
+                  {{ item.from }}
+                  <span class="reason">· left out: no name can be made of it</span>
+                } @else {
+                  {{ item.from }} → {{ item.to }}
+                  <span class="reason">
+                    ·
+                    {{
+                      item.why === 'sameName'
+                        ? 'another tag has this name, with other parent tags'
+                        : 'a comma, a double quote, a leading = or a control character'
+                    }}
+                  </span>
+                }
+              </li>
+            }
+            @if (studio.renamed > studio.renamedItems.length) {
+              <li class="more">
+                … and {{ studio.renamed - studio.renamedItems.length | number }} more
+              </li>
+            }
+          </ul>
+        </details>
+      </li>
+    }
+    @if (leftOut().length > 0) {
+      <li>
+        Not carried over, as SG Tag has no place for them:
+        <ul class="paths names" aria-label="Not carried over">
+          @for (line of leftOut(); track $index) {
+            <li>{{ line }}</li>
+          }
+        </ul>
       </li>
     }
   </ul>

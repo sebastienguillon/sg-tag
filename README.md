@@ -131,6 +131,28 @@ from another that still has them. Importing does not look for duplicates; use Fi
 saving an export fails part way, the file is removed rather than left cut short, so an earlier
 export of the same name is lost: the default name carries the date to avoid that.
 
+### Importing from TagStudio
+
+Settings → **Import from TagStudio…** brings the tags of a [TagStudio](https://github.com/TagStudioDev/TagStudio)
+library into SG Tag: choose the library's folder (or its `.TagStudio` folder). As with a tags
+export, it shows what it would add before writing anything, only ever adds tags, and can be
+repeated. TagStudio libraries saved by TagStudio 9.5 and later are read (`ts_library.sqlite`,
+database versions 6 to 499); one still in TagStudio 9.4's format must be opened once in a recent
+TagStudio, which converts it. SG Tag reads a copy of the database, made in its data folder and
+deleted once read, so TagStudio may stay open and its library is never changed.
+
+- Tag names, aliases, shorthands (as aliases) and parent tags come over. Tags with one name and the
+  same parent tags become one tag; with other parent tags, `Name (Parent)`. A comma, a double
+  quote, a leading `=` or a control character, which a name here cannot hold, is rewritten (a
+  comma becomes a space, a double quote a single quote), and each name written otherwise is listed.
+- A file is found at its path below the library's folder, or else, as TagStudio's "Fix Unlinked
+  Entries" relinks it, as the one file of that name below it; when another TagStudio entry is at
+  that file's path, the file gets the tags of both. Files TagStudio lists that SG Tag does not
+  index (not images or videos), and files of a name several files have, are listed and not tagged.
+- Not carried over, and counted: colours, icons, categories, the hidden setting (hidden tags come
+  over as ordinary tags), fields, and the built-in tags Archived and Favorite when no file has
+  them, and Meta Tags.
+
 ### Tags export format
 
 UTF-8 [JSON Lines](https://jsonlines.org): a header (`format: "sg-tag/tags"`, `version: 2`, `app`,

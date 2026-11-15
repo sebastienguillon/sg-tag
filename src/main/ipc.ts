@@ -34,6 +34,7 @@ export function registerIpc(worker: WorkerHost, trustedOrigin: string, dataDir: 
   // Where the tags dialogs open next, remembered for this session only.
   let exportFolder: string | undefined;
   let importFile: string | undefined;
+  let tagStudioFolder: string | undefined;
 
   ipcMain.on(IpcChannel.requestWorkerPort, (event) => {
     if (trusted(event)) {
@@ -128,6 +129,32 @@ export function registerIpc(worker: WorkerHost, trustedOrigin: string, dataDir: 
     }
     const source = await worker.call('openTagImport', filePath);
     importFile = filePath;
+    return source;
+  });
+
+  ipcMain.handle(IpcChannel.openTagStudioImport, async (event) => {
+    if (!trusted(event)) {
+      return null;
+    }
+    const options: Electron.OpenDialogOptions = {
+      title: 'Import from TagStudio',
+      // macOS shows it in the dialog; elsewhere the title says enough.
+      message: 'Choose the folder of a TagStudio library.',
+      buttonLabel: 'Choose',
+      defaultPath: tagStudioFolder ?? app.getPath('documents'),
+      // Its `.TagStudio` folder can be chosen too.
+      properties: ['openDirectory', 'showHiddenFiles'],
+    };
+    const owner = ownerOf(event);
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    const folder = result.canceled ? undefined : result.filePaths[0];
+    if (folder === undefined) {
+      return null;
+    }
+    const source = await worker.call('openTagStudioImport', folder);
+    tagStudioFolder = folder;
     return source;
   });
 

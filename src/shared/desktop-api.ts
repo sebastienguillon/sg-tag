@@ -17,6 +17,11 @@ export interface DesktopBridge {
    * `LibraryApi.planTagImport`.
    */
   readonly openTagImport: () => Promise<TagImportSource | null>;
+  /**
+   * Asks for the folder of a TagStudio library and reads it, writing nothing; `null` if canceled.
+   * Preview it with `LibraryApi.planTagImport`.
+   */
+  readonly openTagStudioImport: () => Promise<TagImportSource | null>;
   /** The newest FFmpeg release that ffmpeg.org lists, e.g. `9.0.2`; asks ffmpeg.org each time. */
   readonly latestFfmpegRelease: () => Promise<string>;
 }
@@ -30,6 +35,7 @@ export const IpcChannel = {
   trashFile: 'shell:trash-file',
   exportTags: 'tags:export',
   openTagImport: 'tags:open-import',
+  openTagStudioImport: 'tags:open-tagstudio-import',
   latestFfmpegRelease: 'updates:latest-ffmpeg',
 } as const;
 

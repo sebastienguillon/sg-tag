@@ -12,6 +12,7 @@ import type { RootRecord } from '../library/roots-repository';
 import type { TagDefinition } from '../library/tags-repository';
 import { SettingsRepository } from '../library/settings-repository';
 import type { TestLibrary } from '../testing/test-library';
+import { makeTagStudioLibrary } from '../testing/tagstudio-library';
 import { createTestLibrary } from '../testing/test-library';
 import { SLICE_BUDGET_MS, yieldNow } from './slices';
 import { endLine, entryLine, headerLine, tagLine } from './tag-file';
@@ -186,6 +187,7 @@ describe('TagImporter', () => {
         reads.push(target.path);
         return fingerprint(target.path, target.size);
       },
+      copiesDir: path.join(dir, 'imports'),
     });
   });
 
@@ -380,7 +382,14 @@ describe('TagImporter', () => {
 
     expect(preview.found).toEqual({ samePlace: 5, moved: 0, shared: 0 });
     expect(preview.changed).toBe(0);
-    expect(preview.notFound).toEqual({ missing: 0, uncompared: 0, folder: 0, notFound: 0 });
+    expect(preview.notFound).toEqual({
+      missing: 0,
+      uncompared: 0,
+      folder: 0,
+      ambiguous: 0,
+      notMedia: 0,
+      notFound: 0,
+    });
     expect(preview.additions).toEqual(NOTHING);
     expect(preview.additionsWithChanged).toEqual(NOTHING);
     expect(reads).toEqual([]);
@@ -431,7 +440,14 @@ describe('TagImporter', () => {
 
     const { source, preview } = await openAndPlan(exported);
     expect(preview.found).toEqual({ samePlace: 2, moved: 2, shared: 0 });
-    expect(preview.notFound).toEqual({ missing: 0, uncompared: 0, folder: 0, notFound: 1 });
+    expect(preview.notFound).toEqual({
+      missing: 0,
+      uncompared: 0,
+      folder: 0,
+      ambiguous: 0,
+      notMedia: 0,
+      notFound: 1,
+    });
     expect(preview.missedItems).toEqual([
       { exported: file('a/Pictures/left behind.jpg'), reason: 'notFound' },
     ]);
@@ -1429,6 +1445,134 @@ describe('TagImporter', () => {
       { step: 'importing', done: 1_001, total: 1_001 },
       null,
     ]);
+  });
+
+  describe('TagStudio libraries', () => {
+    /** The folder of the TagStudio library of a case, and a library folder at its path. */
+    let folder: string;
+
+    beforeEach(() => {
+      folder = path.join(dir, 'Library');
+    });
+
+    /** The name, aliases and the names of the parent tags of each tag of the library. */
+    const describedTags = (): { name: string; aliases: readonly string[]; parents: string[] }[] => {
+      const list = library.tags.list();
+      const names = new Map(list.map((tag) => [tag.id, tag.name]));
+      return list.map(({ name, aliases, parentIds }) => ({
+        name,
+        aliases,
+        parents: parentIds.map((id) => names.get(id) ?? '?'),
+      }));
+    };
+
+    it('previews the tags of a TagStudio library, then imports them', async () => {
+      await makeTagStudioLibrary(folder, {
+        tags: [
+          { id: 1000, name: 'Paris', shorthand: 'PAR' },
+          { id: 1001, name: 'France' },
+        ],
+        aliases: [[1000, 'Paname']],
+        parents: [[1000, 1001]],
+        files: [
+          { id: 1, path: 'Trips/a.jpg', tags: [1000] },
+          { id: 2, path: 'Old/b.jpg', tags: [1001] },
+          { id: 3, path: 'notes.pdf', tags: [1000] },
+          { id: 4, path: 'Gone/c.jpg', tags: [1000] },
+        ],
+      });
+      const root = library.roots.insert(folder);
+      const a = library.addFile('Trips/a.jpg', { root });
+      const b = library.addFile('New/b.jpg', { root });
+
+      const source = await importer.openTagStudio(folder);
+      expect(source).toMatchObject({
+        kind: 'tagStudio',
+        name: folder,
+        platform: null,
+        files: 4,
+        tags: 2,
+        invalid: 0,
+        tagStudio: { version: 102, renamed: 0 },
+      });
+      const preview = await importer.plan(source.token);
+      expect(library.tags.count()).toBe(0);
+      expect(preview.found).toEqual({ samePlace: 1, moved: 1, shared: 0 });
+      expect(preview.notFound).toEqual({
+        missing: 0,
+        uncompared: 0,
+        folder: 0,
+        ambiguous: 0,
+        notMedia: 1,
+        notFound: 1,
+      });
+      expect(preview.movedItems).toEqual([
+        { exported: path.join(folder, 'Old', 'b.jpg'), current: `${folder}/New/b.jpg` },
+      ]);
+      expect(preview.folders).toEqual([
+        {
+          exported: folder,
+          files: 4,
+          found: 2,
+          foundIn: [folder],
+          inLibrary: true,
+          suspicious: false,
+          addable: false,
+        },
+      ]);
+      expect(preview.definitions).toMatchObject({ created: 2, aliases: 2, links: 1, skipped: 0 });
+      expect(preview.additions).toEqual({ assignments: 2, files: 2, newTags: 0 });
+      // No file was read: TagStudio knows a file by its place.
+      expect(reads).toEqual([]);
+
+      const result = await importer.apply(source.token, preview.planId, false);
+
+      expect(result).toEqual({
+        assignments: 2,
+        files: 2,
+        newTags: 0,
+        skipped: 0,
+        notFound: 2,
+        definitions: { created: 2, aliases: 2, links: 1, skipped: 0 },
+      });
+      expect(describedTags()).toEqual([
+        { name: 'France', aliases: [], parents: [] },
+        { name: 'Paris', aliases: ['Paname', 'PAR'], parents: ['France'] },
+      ]);
+      expect(tagsOf(a)).toEqual(['Paris']);
+      expect(tagsOf(b)).toEqual(['France']);
+
+      // Importing again adds nothing.
+      const again = await importer.openTagStudio(folder);
+      const nothing = await importer.plan(again.token);
+      expect(nothing.additions).toEqual(NOTHING);
+      expect(nothing.definitions).toMatchObject({ created: 0, aliases: 0, links: 0 });
+    });
+
+    it('offers to add the folder of a library that is not in this library', async () => {
+      await makeTagStudioLibrary(folder, {
+        tags: [{ id: 1000, name: 'Paris' }],
+        files: [{ id: 1, path: 'a.jpg', tags: [1000] }],
+      });
+
+      const source = await importer.openTagStudio(folder);
+      const preview = await importer.plan(source.token);
+
+      expect(preview.notFound.folder).toBe(1);
+      expect(preview.folders).toEqual([
+        expect.objectContaining({ exported: folder, found: 0, inLibrary: false, addable: true }),
+      ]);
+    });
+
+    it('refuses a folder that is not a TagStudio library, and closes what was open', async () => {
+      await makeTagStudioLibrary(folder, { tags: [{ id: 1000, name: 'Paris' }] });
+      const open = await importer.openTagStudio(folder);
+
+      await expect(importer.openTagStudio(dir)).rejects.toThrow(
+        'This folder is not a TagStudio library: choose the folder that holds its .TagStudio folder.',
+      );
+      await expect(importer.plan(open.token)).rejects.toThrow(NOT_OPEN);
+    });
   });
 });
 

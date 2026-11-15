@@ -2,6 +2,7 @@ import { computed, effect, inject, Injectable, resource, signal, untracked } fro
 import { createLogger } from '@shared/log';
 import type {
   TagExportResult,
+  TagImportKind,
   TagImportPreview,
   TagImportResult,
   TagImportSource,
@@ -20,8 +21,8 @@ export type ExportState =
 
 export type ImportState =
   | { readonly step: 'idle' }
-  /** Dialog open, then reading the chosen file. */
-  | { readonly step: 'opening' }
+  /** Dialog open, then reading the chosen tags export or TagStudio library. */
+  | { readonly step: 'opening'; readonly kind: TagImportKind }
   | { readonly step: 'planning'; readonly source: TagImportSource }
   | {
       readonly step: 'preview';
@@ -54,7 +55,10 @@ const INDEXER_GONE: ReadonlySet<string> = new Set([
   'The indexer is not running',
 ]);
 const EXPORT_RESTARTED = 'The indexer restarted during the export. Try again.';
-const IMPORT_RESTARTED = 'The indexer restarted. Open the tags export again.';
+const IMPORT_RESTARTED: Readonly<Record<TagImportKind, string>> = {
+  tags: 'The indexer restarted. Open the tags export again.',
+  tagStudio: 'The indexer restarted. Import from TagStudio again.',
+};
 
 /** The indexer holds no tags export of this token any more: checking again cannot work. */
 const NOT_OPEN = 'This tags export is no longer open: choose it again.';
@@ -231,24 +235,30 @@ export class TagTransferStore {
     }
   }
 
-  /** Asks for a tags export, then previews importing it. */
-  async open(): Promise<void> {
+  /**
+   * Asks for a tags export, or for the folder of a TagStudio library (`kind`), then previews
+   * importing it.
+   */
+  async open(kind: TagImportKind = 'tags'): Promise<void> {
     if (this.busy()) {
       return;
     }
     // Opening another tags export replaces this one in the indexer, but a canceled dialog does not.
     const previous = this.importing();
     const connection = this.worker.generation();
-    const started: ImportState = { step: 'opening' };
+    const started: ImportState = { step: 'opening', kind };
     this.importing.set(started);
     let source: TagImportSource | null = null;
     try {
-      source = await this.desktop.openTagImport();
+      source =
+        kind === 'tagStudio'
+          ? await this.desktop.openTagStudioImport()
+          : await this.desktop.openTagImport();
     } catch (error) {
       if (this.importing() === started) {
         this.importing.set({
           step: 'error',
-          message: failure(error, IMPORT_RESTARTED),
+          message: failure(error, IMPORT_RESTARTED[kind]),
           source: null,
         });
       }
@@ -268,7 +278,7 @@ export class TagTransferStore {
       } else if (this.worker.generation() === connection) {
         this.importing.set(previous);
       } else {
-        this.importing.set({ step: 'error', message: IMPORT_RESTARTED, source: null });
+        this.importing.set({ step: 'error', message: IMPORT_RESTARTED[kind], source: null });
       }
       return;
     }
@@ -337,7 +347,11 @@ export class TagTransferStore {
       this.notify('import-failed');
       if (this.worker.generation() !== connection) {
         // Its connection was replaced: the indexer restarted.
-        this.importing.set({ step: 'error', message: IMPORT_RESTARTED, source: null });
+        this.importing.set({
+          step: 'error',
+          message: IMPORT_RESTARTED[source.kind],
+          source: null,
+        });
         return;
       }
       // The indexer keeps the tags export open, also when an import stopped partway: checking
@@ -434,7 +448,11 @@ export class TagTransferStore {
       state.step === 'applying' ||
       (state.step === 'error' && state.source !== null)
     ) {
-      this.importing.set({ step: 'error', message: IMPORT_RESTARTED, source: null });
+      this.importing.set({
+        step: 'error',
+        message: IMPORT_RESTARTED[state.source?.kind ?? 'tags'],
+        source: null,
+      });
     }
     if (state.step === 'applying') {
       this.notify('import-failed');

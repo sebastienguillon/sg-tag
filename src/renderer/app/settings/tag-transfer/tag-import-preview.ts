@@ -14,6 +14,7 @@ import type {
   TagImportPreview as Preview,
   TagImportSkip,
   TagImportSource,
+  TagStudioLeftOut,
 } from '@shared/model';
 import { MAX_TAG_ALIASES, MAX_TAG_PARENTS } from '@shared/tag-names';
 import { ipcErrorMessage } from '../../core/desktop';
@@ -32,8 +33,60 @@ const REASON_LABELS: Readonly<Record<TagImportMissReason, string>> = {
   missing: 'missing when exported',
   uncompared: 'drive not connected or unreadable',
   folder: 'folder not in this library',
+  ambiguous: 'several files have this name',
+  notMedia: 'not an image or a video',
   notFound: 'not found',
 };
+
+/** For a TagStudio library, whose one folder is on this computer. */
+const TAGSTUDIO_REASON_LABELS: Readonly<Record<TagImportMissReason, string>> = {
+  ...REASON_LABELS,
+  folder: 'outside your library folders',
+};
+
+/** `1 tag`, `3,410 tags`: the number as the `number` pipe writes it. */
+function counted(count: number, one: string, many: string, locale: string): string {
+  return `${formatNumber(count, locale)} ${count === 1 ? one : many}`;
+}
+
+/** What a TagStudio library holds that does not come over, a line for each kind of thing. */
+function leftOutLines(leftOut: TagStudioLeftOut, locale: string): string[] {
+  const tags = (count: number): string => counted(count, 'tag', 'tags', locale);
+  const lines: string[] = [];
+  if (leftOut.colors > 0) {
+    lines.push(`The colours of ${tags(leftOut.colors)}`);
+  }
+  if (leftOut.icons > 0) {
+    lines.push(`The icons of ${tags(leftOut.icons)}`);
+  }
+  if (leftOut.categories > 0) {
+    lines.push(`The category setting of ${tags(leftOut.categories)}: they come over as tags`);
+  }
+  if (leftOut.hidden > 0) {
+    lines.push(`The hidden setting of ${tags(leftOut.hidden)}: they come over as ordinary tags`);
+  }
+  if (leftOut.fields > 0) {
+    lines.push(
+      `${counted(leftOut.fields, 'field', 'fields', locale)} of files (titles, notes, dates…)`,
+    );
+  }
+  if (leftOut.builtIn > 0) {
+    lines.push(
+      `${counted(leftOut.builtIn, 'built-in tag', 'built-in tags', locale)} of TagStudio not in use, or Meta Tags`,
+    );
+  }
+  if (leftOut.otherFolders > 0) {
+    lines.push(
+      `${counted(leftOut.otherFolders, 'tagged file', 'tagged files', locale)} in other folders than the library’s own`,
+    );
+  }
+  if (leftOut.broken > 0) {
+    lines.push(
+      `${counted(leftOut.broken, 'entry', 'entries', locale)} of the library pointing at a tag or a file that is not there`,
+    );
+  }
+  return lines;
+}
 
 /** An alias or a parent tag that importing leaves out, and why, in words. */
 interface SkipLine {
@@ -94,7 +147,16 @@ export class TagImportPreview {
   protected readonly headingId = `tag-import-heading-${nextId}`;
   /** Ties the button that imports or closes to what importing would add. */
   protected readonly summaryId = `tag-import-summary-${nextId++}`;
-  protected readonly reasonLabels = REASON_LABELS;
+  /** What is said of a TagStudio library: `null` for a tags export. */
+  protected readonly tagStudio = computed(() => this.source().tagStudio);
+  protected readonly reasonLabels = computed(() =>
+    this.source().kind === 'tagStudio' ? TAGSTUDIO_REASON_LABELS : REASON_LABELS,
+  );
+  /** What a TagStudio library holds that does not come over, in words. */
+  protected readonly leftOut = computed(() => {
+    const details = this.tagStudio();
+    return details === null ? [] : leftOutLines(details.leftOut, this.locale);
+  });
   /** The import is under way, an export, or a library folder is being added: nothing can start. */
   protected readonly locked = this.store.busy;
   protected readonly applying = computed(() => this.store.importState().step === 'applying');
@@ -120,8 +182,8 @@ export class TagImportPreview {
     return samePlace + moved + shared;
   });
   protected readonly notFound = computed(() => {
-    const { missing, uncompared, folder, notFound } = this.preview().notFound;
-    return missing + uncompared + folder + notFound;
+    const { missing, uncompared, folder, ambiguous, notMedia, notFound } = this.preview().notFound;
+    return missing + uncompared + folder + ambiguous + notMedia + notFound;
   });
   protected readonly nothingFound = computed(
     () => this.found() === 0 && this.preview().changed === 0,
