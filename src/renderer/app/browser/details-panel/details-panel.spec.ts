@@ -1,7 +1,7 @@
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed } from '@angular/core/testing';
 import type { DesktopBridge } from '@shared/desktop-api';
-import type { FileCopy, FileDetails } from '@shared/model';
+import type { FileCopy, FileDetails, Tag, TagAddOutcome } from '@shared/model';
 import { DESKTOP } from '../../core/desktop';
 import { LibraryStore } from '../../core/library-store';
 import { WorkerClient } from '../../core/worker-client';
@@ -39,9 +39,17 @@ const photo: FileDetails = {
   birthtimeMs: null,
   codec: null,
   missing: false,
-  tags: [{ id: 10, path: 'trips/japan' }],
+  tags: [{ id: 10, name: 'Japan' }],
   copies: [copy],
 };
+
+const tag = (id: number, name: string, fileCount: number): Tag => ({
+  id,
+  name,
+  aliases: [],
+  parentIds: [],
+  fileCount,
+});
 
 describe('DetailsPanel', () => {
   let fixture: ComponentFixture<DetailsPanel>;
@@ -64,6 +72,23 @@ describe('DetailsPanel', () => {
     worker.emit('tagsChanged', null);
     await render();
   };
+  const chip = (name: string): HTMLButtonElement | undefined =>
+    [...host.querySelectorAll<HTMLButtonElement>('.chip-label')].find(
+      (candidate) => candidate.firstChild?.textContent?.trim() === name,
+    );
+  /** Types `name` in the tag input, or pastes it, and presses Enter. */
+  const addTag = async (name: string): Promise<void> => {
+    const field = host.querySelector<HTMLInputElement>('app-tag-input input')!;
+    field.value = name;
+    field.dispatchEvent(new Event('input'));
+    field.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    );
+    await render();
+  };
+  /** What the panel says of a name the worker made no tag of: its own line, under the tag input. */
+  const refusal = (): string | null =>
+    host.querySelector('.tags > [role="alert"]')?.textContent ?? null;
   /** Holds the next move to the Trash, as during the round trip to the main process. */
   const holdTrash = (): PromiseWithResolvers<undefined> => {
     const move = Promise.withResolvers<undefined>();
@@ -104,11 +129,174 @@ describe('DetailsPanel', () => {
     await render();
   });
 
-  it('lists identical copies with their location and tags', () => {
+  it('shows each tag of the file by its name, on a chip that searches for it', async () => {
+    await reload({
+      ...photo,
+      tags: [
+        { id: 10, name: 'Japan' },
+        { id: 12, name: 'New York' },
+      ],
+    });
+    expect(
+      [...host.querySelectorAll('.chip-label')].map((label) => label.textContent.trim()),
+    ).toEqual(['Japan', 'New York']);
+    expect(chip('Japan')?.title).toBe('Search tag:Japan');
+    expect(chip('New York')?.title).toBe('Search tag:"New York"');
+
+    const store = TestBed.inject(LibraryStore);
+    chip('Japan')?.click();
+    expect(store.query()).toBe('tag:Japan');
+    // Quoted, or the search would read two terms.
+    chip('New York')?.click();
+    expect(store.query()).toBe('tag:"New York"');
+  });
+
+  it('takes a tag from the file with the button of its chip', async () => {
+    host.querySelector<HTMLButtonElement>('[aria-label="Remove tag Japan"]')?.click();
+    await render();
+    expect(worker.callsTo('removeTags')).toEqual([[[photo.id], [10]]]);
+  });
+
+  it('gives the file the tag typed, by its name', async () => {
+    worker.respond('addTags', (_ids, names) =>
+      names.map((name) => ({ name, status: 'added', tag: { id: 11, name } })),
+    );
+    await addTag('Kyoto');
+    expect(worker.callsTo('addTags')).toEqual([[[photo.id], ['Kyoto']]]);
+    expect(refusal()).toBeNull();
+  });
+
+  it('leaves a name that cannot be a tag to the tag input, which says why: nothing is sent', async () => {
+    await addTag('Paris, France');
+    expect(worker.callsTo('addTags')).toEqual([]);
+    expect(host.querySelector('app-tag-input [role="alert"]')?.textContent).toBe(
+      'A tag cannot contain a comma: commas separate tags.',
+    );
+    expect(refusal()).toBeNull();
+  });
+
+  // The worker has the last word on the names that the tag input lets through. In the tests below
+  // it refuses such names, as a worker with a stricter rule would, and the reason it gives is only
+  // there to be shown: the field is empty by then, so the panel names the text that was not added.
+
+  it('says why the worker made no tag of a name, until another one is sent', async () => {
+    worker.respond('addTags', (_ids, names) =>
+      names.map((name) => ({ name, status: 'refused', problem: 'comma' })),
+    );
+    await addTag('Kyoto');
+    expect(worker.callsTo('addTags')).toEqual([[[photo.id], ['Kyoto']]]);
+    expect(refusal()).toBe(
+      '“Kyoto” was not added. A tag cannot contain a comma: commas separate tags.',
+    );
+    expect(host.querySelector('app-tag-input [role="alert"]')).toBeNull();
+
+    // Gone as soon as the next name is on its way, whatever becomes of it.
+    const answer = Promise.withResolvers<readonly TagAddOutcome[]>();
+    worker.respond('addTags', () => answer.promise);
+    await addTag('Osaka');
+    expect(refusal()).toBeNull();
+
+    answer.resolve([{ name: 'Osaka', status: 'refused', problem: 'equals' }]);
+    await render();
+    expect(refusal()).toBe('“Osaka” was not added. A tag cannot start with “=”.');
+  });
+
+  it('quotes only the start of a long name that the worker made no tag of', async () => {
+    worker.respond('addTags', (_ids, names) =>
+      names.map((name) => ({ name, status: 'refused', problem: 'tooLong' })),
+    );
+    await addTag(`${'pine'.repeat(15)}apple${'s'.repeat(900)}`);
+    expect(refusal()).toBe(
+      `“${'pine'.repeat(15)}…” was not added. A tag cannot be longer than 1,024 characters.`,
+    );
+
+    // Cut before a character that takes two UTF-16 units, not through it.
+    await addTag(`${'z'.repeat(59)}\u{1F600}${'s'.repeat(900)}`);
+    expect(refusal()).toBe(
+      `“${'z'.repeat(59)}…” was not added. A tag cannot be longer than 1,024 characters.`,
+    );
+  });
+
+  it('forgets a name that made no tag once other files are selected', async () => {
+    const other: FileDetails = { ...photo, id: 4, name: 'dunes.jpg', copies: [] };
+    worker.respond('getDetails', (id) => (id === other.id ? other : photo));
+    worker.respond('addTags', (_ids, names) =>
+      names.map((name) => ({ name, status: 'refused', problem: 'quote' })),
+    );
+    await addTag('Kyoto');
+    expect(refusal()).toBe('“Kyoto” was not added. A tag cannot contain a double quote.');
+
+    TestBed.inject(LibraryStore).selection.set(new Set([other.id]));
+    await render();
+    expect(host.querySelector('.title')?.textContent).toBe('dunes.jpg');
+    expect(refusal()).toBeNull();
+  });
+
+  it('does not say of other files that a name made no tag', async () => {
+    const other: FileDetails = { ...photo, id: 4, name: 'dunes.jpg', copies: [] };
+    worker.respond('getDetails', (id) => (id === other.id ? other : photo));
+    const answer = Promise.withResolvers<readonly TagAddOutcome[]>();
+    worker.respond('addTags', () => answer.promise);
+    await addTag('Kyoto');
+    TestBed.inject(LibraryStore).selection.set(new Set([other.id]));
+    await render();
+
+    answer.resolve([{ name: 'Kyoto', status: 'refused', problem: 'comma' }]);
+    await render();
+    expect(host.querySelector('.title')?.textContent).toBe('dunes.jpg');
+    expect(refusal()).toBeNull();
+  });
+
+  it('shows how many of the selected files have each tag, and suggests those some lack', async () => {
+    worker.respond('getSelectionTags', () => [
+      { id: 10, name: 'Japan', fileCount: 2 },
+      { id: 11, name: 'Kansai', fileCount: 1 },
+    ]);
+    worker.respond('listTags', () => [
+      tag(10, 'Japan', 8),
+      tag(11, 'Kansai', 3),
+      tag(12, 'Osaka', 1),
+    ]);
+    worker.emit('tagsChanged', null);
+    TestBed.inject(LibraryStore).selection.set(new Set([photo.id, 4]));
+    await render();
+    expect(host.querySelector('.title')?.textContent).toBe('2 files selected');
+    expect(worker.callsTo('getSelectionTags').at(-1)).toEqual([[photo.id, 4]]);
+    expect(chip('Japan')?.querySelector('.chip-count')).toBeNull();
+    expect(chip('Kansai')?.querySelector('.chip-count')?.textContent).toBe('1/2');
+
+    // Japan is on both files already; Kansai can still be given to the other one.
+    const field = host.querySelector<HTMLInputElement>('app-tag-input input')!;
+    field.focus();
+    field.value = 'a';
+    field.dispatchEvent(new Event('input'));
+    await render();
+    expect(
+      [...host.querySelectorAll('app-tag-input [role="option"] .name')].map(
+        (name) => name.textContent,
+      ),
+    ).toEqual(['Kansai', 'Osaka']);
+  });
+
+  it('lists identical copies with their location and tags', async () => {
     const copies = host.querySelector('.copies');
     expect(copies?.querySelector('h3')?.textContent).toBe('Identical copy');
     expect(copies?.querySelector('.copy-path')?.textContent).toBe('/library/backup/beach copy.jpg');
     expect(copies?.querySelector('.copy-tags')?.textContent.trim()).toBe('No tags');
+
+    await reload({
+      ...photo,
+      copies: [
+        {
+          ...copy,
+          tags: [
+            { id: 10, name: 'Japan' },
+            { id: 12, name: 'New York' },
+          ],
+        },
+      ],
+    });
+    expect(host.querySelector('.copy-tags')?.textContent.trim()).toBe('Japan, New York');
   });
 
   it('gives all copies the same tags on request', async () => {

@@ -6,12 +6,14 @@
     role="combobox"
     aria-label="Add a tag"
     aria-autocomplete="list"
-    placeholder="Add a tag — trips/japan for nesting"
+    placeholder="Add a tag"
     spellcheck="false"
     autocomplete="off"
     [attr.aria-expanded]="expanded()"
     [attr.aria-controls]="listId"
     [attr.aria-activedescendant]="activeId()"
+    [attr.aria-invalid]="problem() === null ? null : 'true'"
+    [attr.aria-describedby]="problem() === null ? null : problemId"
     [value]="text()"
     (input)="onInput($event)"
     (keydown)="onKeydown($event)"
@@ -19,6 +21,9 @@
     (blur)="focused.set(false)"
   />
 </div>
+@if (problem(); as sentence) {
+  <p class="problem" role="alert" [id]="problemId">{{ sentence }}</p>
+}
 @if (expanded()) {
   <ul class="suggestions" role="listbox" [id]="listId">
     @for (tag of suggestions(); track tag.id) {
@@ -28,9 +33,9 @@
           tabindex="-1"
           [class.active]="$index === active()"
           (mousedown)="$event.preventDefault()"
-          (click)="commit(tag.path)"
+          (click)="commit(tag.name)"
         >
-          <span class="path">{{ tag.path }}</span>
+          <span class="name">{{ tag.name }}</span>
           <span class="count">{{ tag.fileCount }}</span>
         </button>
       </li>

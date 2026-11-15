@@ -55,10 +55,10 @@
           <button
             type="button"
             class="chip-label"
-            [title]="`Search tag:${tag.path}`"
+            [title]="`Search ${tagSearch(tag)}`"
             (click)="searchTag(tag)"
           >
-            {{ tag.path }}
+            {{ tag.name }}
             @if (tag.fileCount < count()) {
               <span class="chip-count">{{ tag.fileCount }}/{{ count() }}</span>
             }
@@ -67,7 +67,7 @@
             <button
               type="button"
               class="chip-remove"
-              [attr.aria-label]="`Remove tag ${tag.path}`"
+              [attr.aria-label]="`Remove tag ${tag.name}`"
               (click)="removeTag(tag)"
             >
               <app-icon name="x" />
@@ -80,6 +80,9 @@
     </ul>
     @if (!fileTrashed()) {
       <app-tag-input [exclude]="completeTags()" (add)="addTag($event)" />
+      @if (tagRefusal(); as refusal) {
+        <p class="error" role="alert">{{ refusal }}</p>
+      }
     }
   </section>
 

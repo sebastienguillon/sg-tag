@@ -1,9 +1,12 @@
+import { BYTE_ORDER_MARK } from '@shared/tag-names';
+
 /**
- * Search terms as the search bar splits them: on spaces, except inside quotes. Toolbar toggles use
- * these to add or remove one term while keeping the rest of the query as typed.
+ * Search terms as the search bar splits them: on spaces, except inside quotes, and without the byte
+ * order marks, which the search leaves out. Toolbar toggles use these to add or remove one term
+ * while keeping the rest of the query as typed.
  */
 function terms(query: string): string[] {
-  return query.match(/(?:[^\s"]+|"[^"]*"?)+/g) ?? [];
+  return query.replaceAll(BYTE_ORDER_MARK, '').match(/(?:[^\s"]+|"[^"]*"?)+/g) ?? [];
 }
 
 /** Whether `query` holds `term`, ignoring case (`IS:Untagged` is `is:untagged`). */

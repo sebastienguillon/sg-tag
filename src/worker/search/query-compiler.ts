@@ -1,7 +1,8 @@
 import type { SortOrder } from '@shared/model';
+import { tagFold, tagNameText, withoutUnseen } from '@shared/tag-names';
 import { HAS_COPY } from '../library/files-repository';
 import { extensionAliases } from '../library/formats';
-import type { Clause } from './query-parser';
+import type { Clause, TagName } from './query-parser';
 
 export interface CompiledQuery {
   readonly sql: string;
@@ -18,8 +19,48 @@ const ORDER: Readonly<Record<SortOrder['field'], readonly string[]>> = {
   size: ['f.size', 'f.id'],
 };
 
-/** Files carrying a tag whose path contains `?` as whole segments, or a descendant of one. */
-const TAG_MATCH = `(t.path = ? OR t.path LIKE ? ESCAPE '\\' OR t.path LIKE ? ESCAPE '\\' OR t.path LIKE ? ESCAPE '\\')`;
+/**
+ * The tags that have a name or an alias among the folds bound as one JSON array (`jsonFolds`): one
+ * parameter whatever the number of names, so that the text of the statement does not change with
+ * it and `SearchService` prepares it once.
+ */
+const TAGS_NAMED = 'SELECT tag_id FROM tag_names WHERE fold IN (SELECT value FROM json_each(?))';
+
+/** The tags that have a name or an alias whose fold matches the pattern bound (`tagPattern`). */
+const TAGS_NAMED_LIKE = `SELECT tag_id FROM tag_names WHERE fold LIKE ? ESCAPE '\\'`;
+
+/**
+ * The tags that `tags` selects, and every tag below one of them.
+ *
+ * `UNION`, never `UNION ALL`: it keeps each tag once. That is what ends the walk should parent
+ * links ever form a loop, and a tag reached through two parents is not walked twice.
+ */
+function withTagsBelow(tags: string): string {
+  return (
+    `WITH RECURSIVE matched(id) AS (${tags} UNION ` +
+    'SELECT tp.tag_id FROM tag_parents tp JOIN matched m ON tp.parent_id = m.id) ' +
+    'SELECT id FROM matched'
+  );
+}
+
+/**
+ * The condition on a file `f`: it carries one of the tags that `tags` selects.
+ *
+ * Nothing in the subquery refers to the file, on purpose: SQLite then builds the set of files once
+ * per statement, the walk through the tags below included, and looks each file up in it. A
+ * subquery that names the file (an `EXISTS` on the tags of each file) is run for every file of the
+ * library instead, which is slow.
+ */
+function carries(tags: string): string {
+  return `f.id IN (SELECT ft.file_id FROM file_tags ft WHERE ft.tag_id IN (${tags}))`;
+}
+
+/** `tag:Name`: the file carries a tag with one of the names bound, or a tag below one. */
+const TAGGED_OR_BELOW = carries(withTagsBelow(TAGS_NAMED));
+/** `tag:=Name`: the file carries a tag with one of the names bound, itself. */
+const TAGGED_EXACTLY = carries(TAGS_NAMED);
+/** Free text: the file carries a tag whose name or alias contains the text, or a tag below one. */
+const TAGGED_LIKE = carries(withTagsBelow(TAGS_NAMED_LIKE));
 
 /** Turns parsed clauses into one parameterised `SELECT f.id …` in display order. */
 export function compileQuery(
@@ -29,6 +70,8 @@ export function compileQuery(
 ): CompiledQuery {
   const where: string[] = [];
   const params: (string | number)[] = [];
+  /** A text is searched by `LIKE` scans over names and folders: see the order below. */
+  let scan = false;
 
   const add = (sql: string, values: readonly (string | number)[], negated: boolean): void => {
     where.push(negated ? `NOT (${sql})` : sql);
@@ -38,29 +81,37 @@ export function compileQuery(
   for (const clause of clauses) {
     switch (clause.type) {
       case 'text': {
-        const like = `%${escapeLike(clause.value)}%`;
-        const tagged = `f.id IN (SELECT ft.file_id FROM file_tags ft JOIN tags t ON t.id = ft.tag_id WHERE t.path LIKE ? ESCAPE '\\')`;
-        // Trigram FTS needs at least 3 characters; shorter terms fall back to LIKE scans.
-        if (codePoints(clause.value) >= 3) {
-          add(
-            `(f.id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?) OR ${tagged})`,
-            [ftsPhrase(clause.value), like],
-            clause.negated,
-          );
-        } else {
-          add(
-            `(f.name LIKE ? ESCAPE '\\' OR f.dir LIKE ? ESCAPE '\\' OR ${tagged})`,
-            [like, like, like],
-            clause.negated,
-          );
+        const conditions: string[] = [];
+        const values: string[] = [];
+        for (const text of fileTexts(clause.value)) {
+          // Trigram FTS needs at least 3 characters; shorter terms fall back to LIKE scans.
+          if (codePoints(text) >= 3) {
+            conditions.push('f.id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?)');
+            values.push(ftsPhrase(text));
+          } else {
+            const like = `%${escapeLike(text)}%`;
+            conditions.push(`f.name LIKE ? ESCAPE '\\' OR f.dir LIKE ? ESCAPE '\\'`);
+            values.push(like, like);
+            scan = true;
+          }
         }
+        add(
+          `(${conditions.join(' OR ')} OR ${TAGGED_LIKE})`,
+          [...values, tagPattern(clause.value)],
+          clause.negated,
+        );
         break;
       }
       case 'tag': {
-        const conditions = clause.paths.map(() => TAG_MATCH).join(' OR ');
+        // The names with `=` find their own tag, the others the tags below it too: a term that has
+        // both finds the files of either.
+        const sets = [
+          { sql: TAGGED_OR_BELOW, names: clause.names.filter((name) => !name.exact) },
+          { sql: TAGGED_EXACTLY, names: clause.names.filter((name) => name.exact) },
+        ].filter((set) => set.names.length > 0);
         add(
-          `f.id IN (SELECT ft.file_id FROM file_tags ft JOIN tags t ON t.id = ft.tag_id WHERE ${conditions})`,
-          clause.paths.flatMap(tagPatterns),
+          `(${sets.map((set) => set.sql).join(' OR ')})`,
+          sets.map((set) => jsonFolds(set.names)),
           clause.negated,
         );
         break;
@@ -144,7 +195,6 @@ export function compileQuery(
   // Terms under 3 characters are LIKE scans over names and folders, which are not in the sort
   // indexes. Walking an index in display order would then cost one random row read per file; a
   // sequential scan plus sort is several times faster. Unary `+` keeps SQLite off the index.
-  const scan = clauses.some((clause) => clause.type === 'text' && codePoints(clause.value) < 3);
   const orderBy = [
     ...(groupCopies ? ['f.size DESC', 'f.content_hash'] : []),
     ...ORDER[sort.field].map(
@@ -166,6 +216,17 @@ function codePoints(value: string): number {
   return count;
 }
 
+/**
+ * What the names of files and folders are searched for: `text` as it is compared with the names of
+ * tags, without the characters nobody sees and with its whitespace collapsed, and as typed too when
+ * that differs: a name on disk may hold such a character itself (an emoji joined by a zero-width
+ * joiner). A text made of such characters alone is searched as typed.
+ */
+function fileTexts(text: string): string[] {
+  const seen = withoutUnseen(text).normalize('NFC');
+  return seen === '' || seen === text ? [text] : [seen, text];
+}
+
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&');
 }
@@ -175,7 +236,21 @@ function ftsPhrase(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-function tagPatterns(path: string): string[] {
-  const escaped = escapeLike(path);
-  return [path, `${escaped}/%`, `%/${escaped}`, `%/${escaped}/%`];
+/**
+ * The names of a `tag:` term as one JSON parameter for `TAGS_NAMED`, each as `tag_names.fold` holds
+ * a name: without letter case, accents or characters nobody sees.
+ */
+function jsonFolds(names: readonly TagName[]): string {
+  return JSON.stringify(names.map(({ name }) => tagFold(name)));
+}
+
+/**
+ * The `LIKE` pattern for `TAGS_NAMED_LIKE`: the names and aliases that contain `text`, compared as
+ * `tag_names.fold` holds a name, whose whitespace is collapsed.
+ */
+function tagPattern(text: string): string {
+  const fold = tagFold(tagNameText(text));
+  // Accents alone fold to nothing, which every name contains: such a text finds no tag, as no name
+  // is made of accents alone, rather than every tag.
+  return fold === '' ? '' : `%${escapeLike(fold)}%`;
 }

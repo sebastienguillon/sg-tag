@@ -20,11 +20,11 @@ import { TagTransfer } from './tag-transfer';
 const DATA_DIR = '/Users/seb/Library/Application Support/SG Tag';
 const EXPORT_PATH = '/Users/seb/Documents/SG Tag tags 2026-10-19.jsonl';
 
-const tag = (id: number, path: string): Tag => ({
+const tag = (id: number, name: string): Tag => ({
   id,
-  path,
-  name: path,
-  parentId: null,
+  name,
+  aliases: [],
+  parentIds: [],
   fileCount: 1,
 });
 
@@ -275,10 +275,9 @@ describe('TagTransfer', () => {
     );
   });
 
-  it('says how many tags the tags export could not hold, and every reason why', async () => {
+  it('says how many tags the tags export could not hold, and why', async () => {
     const path = EXPORT_PATH;
-    const limits =
-      'a tags export cannot hold tags longer than 1,024 characters, nested more than 64 levels deep, with more than 30 combining marks in a row, or past 1,000 on a file.';
+    const limits = 'a tags export cannot hold more than 1,000 tags on one file.';
     // Distinct tags: one on 1,203 files is left out once.
     exportTags = () => Promise.resolve({ path, files: 12_345, missing: 12, tags: 87, leftOut: 3 });
     button('Export tags…')?.click();

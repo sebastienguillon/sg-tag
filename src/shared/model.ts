@@ -1,5 +1,7 @@
 /** Domain types exchanged between the indexer worker, the main process and the renderer. */
 
+import type { TagNameProblem } from './tag-names';
+
 export type FileKind = 'image' | 'video';
 
 /** Everything a grid tile needs; kept small because thousands are fetched while scrolling. */
@@ -43,13 +45,23 @@ export interface FileCopy {
 
 export interface TagRef {
   readonly id: number;
-  /** Full hierarchical path, `/`-separated, e.g. `trips/2024/japan`. */
-  readonly path: string;
+  /** The tag's name, as typed when it was made or renamed. Aliases are in `Tag.aliases`. */
+  readonly name: string;
 }
 
+/**
+ * A tag: one name, any number of aliases (other names it answers to), and any number of parent
+ * tags. Searching a tag also finds the files of the tags below it, at any depth.
+ */
 export interface Tag extends TagRef {
-  readonly name: string;
-  readonly parentId: number | null;
+  /** In the order `list()` sorts names. A name or an alias resolves to exactly one tag. */
+  readonly aliases: readonly string[];
+  /** Its parent tags, one step up. */
+  readonly parentIds: readonly number[];
+  /**
+   * Files that carry the tag itself, present or missing from disk; the files of the tags below it
+   * are not counted.
+   */
   readonly fileCount: number;
 }
 
@@ -57,6 +69,73 @@ export interface Tag extends TagRef {
 export interface TagUsage extends TagRef {
   readonly fileCount: number;
 }
+
+/** What a tag stands for in the library, worked out for one tag when it is edited or deleted. */
+export interface TagDetails {
+  readonly tag: Tag;
+  readonly parents: readonly TagRef[];
+  /** Its child tags, one step down. */
+  readonly children: readonly TagRef[];
+  /** Tags below it, at any depth. */
+  readonly tagsBelow: number;
+  /**
+   * Files on disk that carry the tag itself: what `tag:=Name` lists. A search ignores accents, so
+   * it lists more when another tag has a name or an alias that differs from this one's only by
+   * them; the same goes for `filesWithBelow`.
+   */
+  readonly ownFiles: number;
+  /** Files on disk that carry it or a tag below it, each once: what `tag:Name` lists. */
+  readonly filesWithBelow: number;
+  /** Files that carry the tag itself, missing ones included: what deleting it takes the tag from. */
+  readonly taggedFiles: number;
+  /**
+   * Of `taggedFiles`, those missing from disk that have no other tag: they are kept for their tags
+   * only, so deleting the tag forgets them.
+   */
+  readonly forgottenFiles: number;
+}
+
+/** What became of one name given to `addTags`. */
+export type TagAddOutcome =
+  /**
+   * `added`: at least one file gained the tag. `present`: no file gained it: every file had it
+   * already, or none of the files exists any more (a tag made for the name then does not stay).
+   */
+  | { readonly name: string; readonly status: 'added' | 'present'; readonly tag: TagRef }
+  | { readonly name: string; readonly status: 'refused'; readonly problem: TagNameProblem };
+
+/** Why a change to a tag was not made. Nothing was changed. */
+export type TagEditError =
+  /** The tag no longer exists: deleted or merged meanwhile. */
+  | { readonly kind: 'gone' }
+  /** A tags export is being written or a tags import applied: tags cannot be edited meanwhile. */
+  | { readonly kind: 'busy' }
+  | { readonly kind: 'invalid'; readonly problem: TagNameProblem }
+  /** The name is the name (or, with `asAlias`, an alias) of `owner`, another tag. */
+  | { readonly kind: 'taken'; readonly owner: TagRef; readonly asAlias: boolean }
+  /**
+   * `below` is already below `above` (through `through`, or directly when it is `null`), so the
+   * change would put a tag below itself. `above` and `below` are the same tag when a tag was given
+   * itself as a parent.
+   */
+  | {
+      readonly kind: 'loop';
+      readonly above: TagRef;
+      readonly below: TagRef;
+      readonly through: TagRef | null;
+    }
+  /**
+   * A tag would have more aliases or parent tags than a tag may: the tag changed or, when a tag is
+   * deleted, one of its child tags.
+   */
+  | { readonly kind: 'limit'; readonly what: 'aliases' | 'parents' };
+
+/** The tag as it is after a change, or why the change was not made. */
+export type TagEditResult =
+  { readonly ok: true; readonly tag: Tag } | { readonly ok: false; readonly error: TagEditError };
+
+export type TagDeleteResult =
+  { readonly ok: true } | { readonly ok: false; readonly error: TagEditError };
 
 export interface LibraryRoot {
   readonly id: number;
@@ -138,9 +217,8 @@ export interface TagExportResult {
   /** Tags in the library. */
   readonly tags: number;
   /**
-   * Distinct tags left out of at least one file because a tags export cannot hold them: longer
-   * than its limit, nested deeper, with a long run of combining marks, or past the number a file
-   * may carry.
+   * Distinct tags left out of at least one file: a tags export holds 1,000 tags of a file at most,
+   * the first in the order of their names.
    */
   readonly leftOut: number;
 }
@@ -166,7 +244,10 @@ export interface TagImportSource {
   readonly platform: string | null;
   /** Tagged files it lists that can be read. */
   readonly files: number;
-  /** Distinct tags of those files, ancestors included. */
+  /**
+   * Distinct tags of those files: names that differ only in letter case, or by characters nobody
+   * sees, are one tag.
+   */
   readonly tags: number;
   /**
    * Lines that could not be read in full: the line is left out, or only the tags that could not be
@@ -234,7 +315,10 @@ export interface TagImportAdditions {
   readonly assignments: number;
   /** Files that gain at least one tag. */
   readonly files: number;
-  /** Tags that do not exist yet, ancestors included. */
+  /**
+   * Of the tags added, those that do not exist yet, each once: their names in the tags export are
+   * neither the name nor an alias of a tag here.
+   */
   readonly newTags: number;
 }
 

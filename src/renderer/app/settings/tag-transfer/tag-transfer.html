@@ -90,14 +90,13 @@
     </p>
     @if (exported.leftOut > 0) {
       <!--
-        The indexer's limits: MAX_TAG_LENGTH, MAX_TAG_DEPTH, MAX_MARK_RUN and MAX_TAGS in
-        tag-file.ts. Past MAX_TAGS, a tag is left out of some of its files only.
+        The indexer's limit: MAX_TAGS in tag-file.ts. A tag past it on a file is left out of that
+        file only.
       -->
       <p>
         {{ exported.leftOut | number }} tag{{ exported.leftOut === 1 ? '' : 's' }} could not be
         exported for some or all of {{ exported.leftOut === 1 ? 'its' : 'their' }} files: a tags
-        export cannot hold tags longer than 1,024 characters, nested more than 64 levels deep, with
-        more than 30 combining marks in a row, or past 1,000 on a file.
+        export cannot hold more than 1,000 tags on one file.
       </p>
     }
   </div>

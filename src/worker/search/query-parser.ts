@@ -1,11 +1,24 @@
 import type { FileKind } from '@shared/model';
+import { BYTE_ORDER_MARK, tagNameText, withoutUnseen } from '@shared/tag-names';
 
 export type FileState = 'tagged' | 'untagged' | 'missing' | 'offline' | 'duplicate';
+
+/** One of the names of a `tag:` term. */
+export interface TagName {
+  /**
+   * The name or an alias of a tag as typed, written as a stored name is: composed (NFC), its
+   * whitespace collapsed. A search compares it without letter case, accents or characters nobody
+   * sees (`tagFold`).
+   */
+  readonly name: string;
+  /** `tag:=Name`: the tag itself, without the tags below it. */
+  readonly exact: boolean;
+}
 
 /** One search term. Terms are AND-ed; comma-separated values inside a term are OR-ed. */
 export type Clause =
   | { readonly type: 'text'; readonly value: string; readonly negated: boolean }
-  | { readonly type: 'tag'; readonly paths: readonly string[]; readonly negated: boolean }
+  | { readonly type: 'tag'; readonly names: readonly TagName[]; readonly negated: boolean }
   | { readonly type: 'kind'; readonly kind: FileKind; readonly negated: boolean }
   | { readonly type: 'ext'; readonly exts: readonly string[]; readonly negated: boolean }
   | { readonly type: 'folder'; readonly value: string; readonly negated: boolean }
@@ -42,13 +55,21 @@ const KEY_ALIASES: Readonly<Record<string, string>> = {
 };
 
 /**
- * Parses the search bar syntax. Incomplete terms (`tag:`, `size:>`) are ignored rather than
- * reported, because the query is re-run on every keystroke.
+ * Parses the search bar syntax. Incomplete terms (`tag:`, `tag:=`, `size:>`) are ignored rather
+ * than reported, because the query is re-run on every keystroke.
  *
- *   beach "summer trip" tag:trips/japan -tag:draft type:video ext:jpg,png size:>10mb is:untagged
+ *   beach "summer trip" tag:Japan,"New York" tag:=France -tag:draft
+ *   type:video ext:jpg,png size:>10mb is:untagged
+ *
+ * `tag:France` is the tag France and every tag below it, `tag:=France` the tag France itself. The
+ * `=` counts for the name it comes before, not for the whole list: `tag:=France,Paris`. Nothing
+ * else is special in the name of a tag: `/` is an ordinary character.
  */
 export function parseQuery(input: string): Clause[] {
-  return tokenize(input.normalize('NFC')).flatMap((token) => {
+  // A byte order mark is left out before the terms are split, as it is left out of a name
+  // (`tagNameText`): nobody sees it, and JavaScript takes it for whitespace, so one pasted inside a
+  // term would end the term there.
+  return tokenize(input.replaceAll(BYTE_ORDER_MARK, '')).flatMap((token) => {
     const clause = toClause(token);
     return clause ? [clause] : [];
   });
@@ -97,11 +118,16 @@ function tokenize(input: string): Token[] {
   return tokens;
 }
 
-function toClause({ negated, key, value, raw }: Token): Clause | null {
+function toClause(token: Token): Clause | null {
+  const { negated, key } = token;
   const field = key === null ? undefined : KEY_ALIASES[key];
+  // The token as typed is composed only where it is returned: composing takes long on a long run
+  // of combining marks, and every other token is read from its value alone.
   if (key !== null && field === undefined) {
-    return text(raw, negated);
+    return text(token.raw.normalize('NFC'), negated);
   }
+  // Normalised only now that the syntax is read, and a tag term later still: see `tagName`.
+  const value = field === 'tag' ? token.value : token.value.normalize('NFC');
   const trimmed = value.trim();
   if (trimmed === '') {
     return null;
@@ -110,10 +136,11 @@ function toClause({ negated, key, value, raw }: Token): Clause | null {
     case undefined:
       return text(trimmed, negated);
     case 'tag': {
-      const paths = list(trimmed)
-        .map((path) => path.replace(/^\/+|\/+$/g, ''))
-        .filter((path) => path !== '');
-      return paths.length > 0 ? { type: 'tag', paths, negated } : null;
+      const names = list(trimmed).flatMap((item) => {
+        const name = tagName(item);
+        return name ? [name] : [];
+      });
+      return names.length > 0 ? { type: 'tag', names, negated } : null;
     }
     case 'type':
     case 'is':
@@ -129,7 +156,9 @@ function toClause({ negated, key, value, raw }: Token): Clause | null {
       return range ? { type: 'size', ...range, negated } : null;
     }
     default:
-      return text(raw, negated);
+      // A key that every object has, `constructor` or `__proto__`: not one of the search syntax
+      // either, though the table above answers something for it.
+      return text(token.raw.normalize('NFC'), negated);
   }
 }
 
@@ -160,6 +189,22 @@ function keyword(value: string, negated: boolean): Clause | null {
 
 function text(value: string, negated: boolean): Clause | null {
   return value === '' ? null : { type: 'text', value, negated };
+}
+
+/**
+ * One name of a `tag:` term, from what was typed; `null` when nothing is left of it without its
+ * `=`.
+ *
+ * The `=` is read before the name is normalised: NFC makes one character, `≠`, of an `=` and the
+ * combining solidus a name may start with, and the `=` would no longer be seen. It is read through
+ * the characters nobody sees, as a name that starts with one of them and an `=` is refused.
+ */
+function tagName(item: string): TagName | null {
+  const exact = withoutUnseen(item).startsWith('=');
+  // The first step of the rule for names, without its checks: a term that cannot be the name of a
+  // tag is compared like any other, and finds a tag only when it folds to one of its names.
+  const name = tagNameText(exact ? item.slice(item.indexOf('=') + 1) : item);
+  return name === '' ? null : { name, exact };
 }
 
 function list(value: string): string[] {

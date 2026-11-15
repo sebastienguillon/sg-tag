@@ -1,5 +1,6 @@
 import { createLogger } from '@shared/log';
-import { app, BrowserWindow, Menu, session } from 'electron';
+import { NEWER_LIBRARY_MESSAGE } from '@shared/worker-api';
+import { app, BrowserWindow, dialog, Menu, session } from 'electron';
 import path from 'node:path';
 import { registerIpc } from './ipc';
 import { applicationMenu } from './menu';
@@ -18,6 +19,12 @@ const userDataOverride = process.env['SG_TAG_USER_DATA'];
 if (userDataOverride !== undefined && userDataOverride !== '') {
   app.setPath('userData', path.resolve(userDataOverride));
 }
+
+/** What the app says, before it quits, of a library made by a newer version of SG Tag. */
+const NEWER_LIBRARY = {
+  title: 'SG Tag cannot open the library',
+  detail: NEWER_LIBRARY_MESSAGE,
+} as const;
 
 registerSchemes();
 
@@ -48,6 +55,12 @@ async function main(): Promise<void> {
     dataDir,
     resourcesDir: process.resourcesPath,
     appVersion: app.getVersion(),
+    onNewerLibrary: () => {
+      // Said once: the indexer is not started again. It has closed the library, so nothing is left
+      // to end cleanly.
+      dialog.showErrorBox(NEWER_LIBRARY.title, NEWER_LIBRARY.detail);
+      app.exit(1);
+    },
   });
   worker.start();
 

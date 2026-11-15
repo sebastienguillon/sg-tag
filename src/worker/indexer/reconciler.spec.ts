@@ -29,7 +29,7 @@ describe('Reconciler', () => {
   const idOf = (relative: string): number | undefined =>
     library.files.findByPath(file(relative))?.id;
   const details = (id: number) => library.files.details(id, new Set());
-  const tagsOf = (id: number): string[] => library.tags.forFile(id).map((tag) => tag.path);
+  const tagsOf = (id: number): string[] => library.tags.forFile(id).map((tag) => tag.name);
   /** What the watcher reports for a path that exists. */
   const stat = async (absolute: string): Promise<DiskFile> => {
     const disk = await statFile(absolute);
@@ -107,7 +107,7 @@ describe('Reconciler', () => {
 
     expect(idOf('moved/renamed.jpg')).toBe(id);
     expect(details(id)).toMatchObject({ name: 'renamed.jpg', folder: 'moved', missing: false });
-    expect(library.tags.forFile(id).map((tag) => tag.path)).toEqual(['keep']);
+    expect(library.tags.forFile(id).map((tag) => tag.name)).toEqual(['keep']);
   });
 
   it('keeps vanished tagged files as missing until they reappear', async () => {

@@ -1,4 +1,4 @@
-import type { FileKind } from '@shared/model';
+import type { FileKind, Tag, TagEditResult } from '@shared/model';
 import type { Db } from '../database/database';
 import { openDatabase } from '../database/database';
 import { FilesRepository } from '../library/files-repository';
@@ -30,6 +30,46 @@ export interface TestLibrary {
       readonly missingSince?: number;
     },
   ) => number;
+  /** `defineTag` in this library: a tag with aliases and parents. Tag files with `tags`. */
+  readonly addTag: (name: string, definition?: TagDefinition) => number;
+}
+
+/** What a tag is given besides its name. */
+export interface TagDefinition {
+  readonly aliases?: readonly string[];
+  /** The names of its parents, each made a tag when no tag has it. */
+  readonly parents?: readonly string[];
+}
+
+/**
+ * The tag as a change left it. Throws when the repository refused the change, so that no spec goes
+ * on with less than it asked for.
+ */
+export function editedTag(result: TagEditResult): Tag {
+  if (!result.ok) {
+    throw new Error(`The change to the tag was refused: ${JSON.stringify(result.error)}`);
+  }
+  return result.tag;
+}
+
+/**
+ * Makes the tag named `name`, unless a tag has that name or alias already, gives it the aliases of
+ * `definition` and puts it below its parents; returns the id of the tag. Throws when the repository
+ * refuses any of it.
+ */
+export function defineTag(
+  tags: TagsRepository,
+  name: string,
+  { aliases = [], parents = [] }: TagDefinition = {},
+): number {
+  const id = tags.resolve([name])[0]?.id ?? editedTag(tags.createTag(name)).id;
+  for (const alias of aliases) {
+    editedTag(tags.addAlias(id, alias));
+  }
+  for (const parent of parents) {
+    editedTag(tags.addParent(id, parent));
+  }
+  return id;
 }
 
 /** An in-memory, fully migrated library database with one root at `/library`. */
@@ -74,5 +114,7 @@ export function createTestLibrary(): TestLibrary {
     return id;
   };
 
-  return { db, files, tags, roots, root, addFile };
+  const addTag: TestLibrary['addTag'] = (name, definition) => defineTag(tags, name, definition);
+
+  return { db, files, tags, roots, root, addFile, addTag };
 }

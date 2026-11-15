@@ -52,7 +52,7 @@ const exportOf = (
   entries,
   invalid: 0,
   problems: [],
-  tagCount: 1,
+  tags: new Map([['t', 't']]),
 });
 
 /** How each entry was found, and the path of the file found. */
@@ -164,7 +164,7 @@ describe.each([true, false])(
           from.files.setFingerprint(target, await fingerprint(target.path, target.size));
         }
         const rows = from.files.taggedPage(0, 1_000);
-        const tags = from.tags.pathsForFiles(rows.map((row) => row.id));
+        const tags = from.tags.namesForFiles(rows.map((row) => row.id));
         const exported = path.join(dir, 'tags.jsonl');
         await writeFile(
           exported,

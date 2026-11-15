@@ -24,4 +24,10 @@ describe('query terms', () => {
       'beach type:image',
     );
   });
+
+  it('leaves a byte order mark out, as the search does', () => {
+    expect(hasTerm('is:un\uFEFFtagged', 'is:untagged')).toBe(true);
+    expect(toggleTerm('tag:Pa\uFEFFris', 'is:untagged')).toBe('tag:Paris is:untagged');
+    expect(toggleTerm('\uFEFFis:untagged', 'is:untagged')).toBe('');
+  });
 });

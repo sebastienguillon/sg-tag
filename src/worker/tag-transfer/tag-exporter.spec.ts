@@ -1,4 +1,4 @@
-import type { TagImportResult, TagTransferProgress } from '@shared/model';
+import type { TagAddOutcome, TagImportResult, TagTransferProgress } from '@shared/model';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import type * as FsPromises from 'node:fs/promises';
@@ -159,7 +159,6 @@ describe('TagExporter', () => {
       ids,
       library.tags.list().map((tag) => tag.id),
     );
-    library.tags.pruneUnused();
     const importer = new TagImporter({
       files: library.files,
       tags: library.tags,
@@ -207,7 +206,8 @@ describe('TagExporter', () => {
     library.addFile('untagged.jpg');
     const gone = library.addFile('gone.jpg', { size: 20, mtimeMs: 6, missingSince: 1 });
     const away = library.addFile('away.jpg', { size: 30, mtimeMs: 7, root: drive });
-    library.tags.addToFiles([photo, gone, away], ['trips/2024']);
+    library.tags.addToFiles([photo, gone, away], ['Japan 2024']);
+    library.tags.addToFiles([photo], ['Ana']);
 
     expect(await exporter.export(destination, APP)).toEqual({
       path: destination,
@@ -220,14 +220,14 @@ describe('TagExporter', () => {
     const lines = await linesOf();
     expect(lines[0]).toEqual({
       format: 'sg-tag/tags',
-      version: 1,
+      version: 2,
       app: APP,
       exportedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) as string,
       platform: process.platform,
       fingerprint: FINGERPRINT_SCHEME,
       roots: [{ path: '/drive' }, { path: '/library' }],
     });
-    const defaults = { fingerprint: null, sha256: null, missing: false, tags: ['trips/2024'] };
+    const defaults = { fingerprint: null, sha256: null, missing: false, tags: ['Japan 2024'] };
     expect(lines.slice(1)).toEqual([
       {
         ...defaults,
@@ -238,6 +238,7 @@ describe('TagExporter', () => {
         mtimeMs: 5,
         fingerprint: PRINT,
         sha256: HASH,
+        tags: ['Ana', 'Japan 2024'],
       },
       {
         ...defaults,
@@ -278,11 +279,11 @@ describe('TagExporter', () => {
     expect(entry?.['path']).toBe(decomposed);
   });
 
-  it('writes files by id with their tags in any case order, the same each time', async () => {
+  it('writes files by id with their tags in the order of their names, the same each time', async () => {
     const zebra = library.addFile('zebra.jpg', { mtimeMs: 1 });
     const apple = library.addFile('apple.jpg', { mtimeMs: 2 });
     library.tags.addToFiles([apple], ['trips']);
-    library.tags.addToFiles([zebra], ['beta', 'Alpha', 'gamma/Delta']);
+    library.tags.addToFiles([zebra], ['beta', 'Tag 10', 'Alpha', 'Tag 9', 'Été']);
     const again = path.join(dir, 'again.jsonl');
 
     await exporter.export(destination, APP);
@@ -290,7 +291,7 @@ describe('TagExporter', () => {
 
     const entries = await entriesOf();
     expect(entries.map((entry) => [entry['rel'], entry['tags']])).toEqual([
-      ['zebra.jpg', ['Alpha', 'beta', 'gamma/Delta']],
+      ['zebra.jpg', ['Alpha', 'beta', 'Été', 'Tag 9', 'Tag 10']],
       ['apple.jpg', ['trips']],
     ]);
     // Only the time of the export differs.
@@ -352,22 +353,55 @@ describe('TagExporter', () => {
     ]);
   });
 
+  it('leaves out a file that lost its tags while the export was being written', async () => {
+    const kept = library.addFile('kept.jpg');
+    const lost = library.addFile('lost.jpg');
+    library.tags.addToFiles([kept, lost], ['Ana']);
+    // Tags can be removed during an export: this file loses its tag once its page is listed, while
+    // the fingerprints of the page are read.
+    let removed = false;
+    exporter = createExporter({
+      fingerprint: () => {
+        if (!removed) {
+          removed = true;
+          library.tags.removeFromFiles(
+            [lost],
+            library.tags.forFile(lost).map((tag) => tag.id),
+          );
+        }
+        return Promise.resolve(PRINT);
+      },
+    });
+
+    expect(await exporter.export(destination, APP)).toMatchObject({ files: 1, leftOut: 0 });
+
+    const lines = await linesOf();
+    expect(lines.slice(1, -1).map((entry) => [entry['rel'], entry['tags']])).toEqual([
+      ['kept.jpg', ['Ana']],
+    ]);
+    expect(lines.at(-1)).toEqual({ end: true, files: 1 });
+    // A line without a tag is one that an import reports as a problem.
+    const read = await readBack();
+    expect(read.problems).toEqual([]);
+    expect(read.entries.map((entry) => entry.segments)).toEqual([['kept.jpg']]);
+  });
+
   it('writes the tags of a file in a line its import reads whole, up to the tags it takes', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const photo = library.addFile('photo.jpg');
     const many = library.addFile('many.jpg');
     const trip = library.addFile('trip.jpg');
-    // The most an import takes: 1,000 tags of 1,024 characters, each of 6 bytes as JSON.
-    const longest = Array.from({ length: 999 }, (_, index) =>
-      String(index).padEnd(1_024, '\u0001'),
-    );
-    library.tags.addToFiles([photo], ['people/Ana', ...longest]);
-    // One tag past that, of 3 bytes a character.
-    const past = Array.from({ length: 1_001 }, (_, index) =>
-      String(index).padStart(4, '0').padEnd(1_024, '語'),
+    // The most an import takes: 1,000 tags of 1,024 characters, each of 3 bytes, the most a
+    // character of a name takes.
+    const longest = Array.from({ length: 999 }, (_, index) => String(index).padEnd(1_024, '語'));
+    expect(tagged(library.tags.addToFiles([photo], ['Ana', ...longest]))).toBe(1_000);
+    // One tag past that.
+    const past = Array.from(
+      { length: 1_001 },
+      (_, index) => `tag ${String(index).padStart(4, '0')}`,
     );
     library.tags.addToFiles([many], past);
-    library.tags.addToFiles([trip], ['trips/2024']);
+    library.tags.addToFiles([trip], ['Japan 2024']);
 
     expect(await exporter.export(destination, APP)).toMatchObject({
       files: 3,
@@ -376,86 +410,152 @@ describe('TagExporter', () => {
     });
 
     const [, photoLine] = (await readFile(destination, 'utf8')).split('\n');
-    expect(Buffer.byteLength(photoLine ?? '')).toBeGreaterThan(6_000_000);
-    const read = await readTagFile(destination, {
-      signal: new AbortController().signal,
-      onBytes: () => undefined,
-    });
+    expect(Buffer.byteLength(photoLine ?? '')).toBeGreaterThan(3_000_000);
+    expect(Buffer.byteLength(photoLine ?? '')).toBeLessThanOrEqual(MAX_LINE_BYTES);
+    const read = await readBack();
     expect(read.entries.map((entry) => entry.segments)).toEqual([
       ['photo.jpg'],
       ['many.jpg'],
       ['trip.jpg'],
     ]);
-    expect(read.entries[0]?.tags.toSorted()).toEqual(['people/Ana', ...longest].toSorted());
+    expect(read.entries[0]?.tags.toSorted()).toEqual(['Ana', ...longest].toSorted());
     // Past them, tags are left out of the export, which says so: the import has nothing to leave.
     expect(read.entries[1]?.tags).toEqual(past.slice(0, 1_000));
     expect(read.problems).toEqual([]);
   });
 
-  it('leaves out the tags an import would, and says how many, so no line is too long', async () => {
+  it('writes every name the library takes as its import reads it back', async () => {
+    const photo = library.addFile('photo.jpg');
+    // At the limits of what a name may be.
+    const names = [
+      'x'.repeat(1_024),
+      '/'.repeat(1_024),
+      // Combining marks in a row.
+      `q${'\u0316'.repeat(30)}`,
+      'AC/DC',
+      'back\\slash',
+      // A character of two UTF-16 units.
+      'beach \u{1F3D6}',
+      'Été',
+    ];
+    // And past them: the library takes none of these, so there is none to export. The third is
+    // within the limit as typed and past it as stored: NFC writes each of its marks as two.
+    const refused = [
+      'x'.repeat(1_025),
+      `q${'\u0316'.repeat(31)}`,
+      `a${'\u0344'.repeat(16)}`,
+      'Paris, France',
+      'say "cheese"',
+    ];
+    expect(tagged(library.tags.addToFiles([photo], [...names, ...refused]))).toBe(names.length);
+
+    expect(await exporter.export(destination, APP)).toMatchObject({
+      files: 1,
+      tags: names.length,
+      leftOut: 0,
+    });
+
+    const read = await readBack();
+    expect(read.problems).toEqual([]);
+    expect(read.entries[0]?.tags.toSorted()).toEqual(names.toSorted());
+  });
+
+  it('leaves out the tags of a file past 1,000, and says how many', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const pasted = library.addFile('pasted.jpg');
     const wordy = library.addFile('wordy.jpg');
-    const odd = library.addFile('odd.jpg');
-    const none = library.addFile('none.jpg');
-    // Nothing keeps a tag from being this long: a pasted text, longer than a line may be.
-    library.tags.addToFiles([pasted], ['people/Ana', `note ${'x'.repeat(MAX_LINE_BYTES)}`]);
-    // One more tag than a file may carry.
+    const terse = library.addFile('terse.jpg');
+    // One more tag than a tags export holds for one file.
     const words = Array.from(
       { length: 1_001 },
       (_, index) => `word ${String(index).padStart(4, '0')}`,
     );
     library.tags.addToFiles([wordy], words);
-    library.tags.addToFiles(
-      [odd],
-      ['trips/2024', `deep${'/level'.repeat(64)}`, `q${'̖'.repeat(31)}`],
-    );
-    library.tags.addToFiles([none], [`q${'̖'.repeat(40)}`]);
+    library.tags.addToFiles([terse], ['Ana']);
 
-    // Each tag left out once: 1 + 1 + 2 + 1.
-    expect(await exporter.export(destination, APP)).toMatchObject({ files: 3, leftOut: 5 });
+    expect(await exporter.export(destination, APP)).toMatchObject({ files: 2, leftOut: 1 });
 
-    for (const line of (await readFile(destination, 'utf8')).split('\n')) {
-      expect(Buffer.byteLength(line)).toBeLessThanOrEqual(MAX_LINE_BYTES);
-    }
-    const read = await readTagFile(destination, {
-      signal: new AbortController().signal,
-      onBytes: () => undefined,
-    });
+    const read = await readBack();
     expect(read.problems).toEqual([]);
+    // The first 1,000, in the order of their names.
     expect(read.entries.map((entry) => [entry.segments, entry.tags])).toEqual([
-      [['pasted.jpg'], ['people/Ana']],
       [['wordy.jpg'], words.slice(0, 1_000)],
-      [['odd.jpg'], ['trips/2024']],
+      [['terse.jpg'], ['Ana']],
     ]);
     expect(warn).toHaveBeenCalledWith(
       '[tag-transfer]',
-      'Left out 5 tags a tags export cannot hold (too long, too deep, ' +
-        'with a long run of combining marks, or too many on one file)',
+      'Left out 1 tags of files that have more tags than a tags export holds for one file',
     );
   });
 
   it('counts each tag left out once, however many files it is left out of', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const ids = ['a.jpg', 'b.jpg', 'c.jpg'].map((name) => library.addFile(name));
-    library.tags.addToFiles(ids, [`note ${'x'.repeat(1_024)}`, 'kept']);
-    // Tags of a file are written in order: past 1,000, the last is left out of this file only.
-    const many = library.addFile('many.jpg');
     const tags = Array.from(
-      { length: 1_001 },
+      { length: 1_002 },
       (_, index) => `tag ${String(index).padStart(4, '0')}`,
     );
-    library.tags.addToFiles([many], tags);
-    library.tags.addToFiles([ids[0] ?? 0], ['tag 1000']);
+    const many = library.addFile('many.jpg');
+    const more = library.addFile('more.jpg');
+    const few = library.addFile('few.jpg');
+    // Tags of a file are written in order: past 1,000, the last are left out of these files only.
+    library.tags.addToFiles([many], tags.slice(0, 1_001));
+    library.tags.addToFiles([more], tags);
+    library.tags.addToFiles([few], ['tag 1000']);
 
-    expect(await exporter.export(destination, APP)).toMatchObject({ files: 4, leftOut: 2 });
+    // `tag 1000`, left out of two files, and `tag 1001`.
+    expect(await exporter.export(destination, APP)).toMatchObject({ files: 3, leftOut: 2 });
 
     expect((await entriesOf()).map((entry) => [entry['rel'], entry['tags']])).toEqual([
-      ['a.jpg', ['kept', 'tag 1000']],
-      ['b.jpg', ['kept']],
-      ['c.jpg', ['kept']],
       ['many.jpg', tags.slice(0, 1_000)],
+      ['more.jpg', tags.slice(0, 1_000)],
+      ['few.jpg', ['tag 1000']],
     ]);
+  });
+
+  it('exports a tag whose name holds `/` as one tag, and imports it back as one', async () => {
+    const photo = library.addFile('photo.jpg', { fingerprint: PRINT });
+    library.tags.addToFiles([photo], ['trips/2024/Japan', 'AC/DC']);
+
+    expect(await exporter.export(destination, APP)).toMatchObject({ files: 1, tags: 2 });
+    expect((await entriesOf()).map((entry) => entry['tags'])).toEqual([
+      ['AC/DC', 'trips/2024/Japan'],
+    ]);
+
+    expect(await restore([photo])).toMatchObject({ assignments: 2, files: 1, newTags: 2 });
+    // Neither `trips` nor `trips/2024` is a tag, and no tag has a parent.
+    expect(
+      library.tags.list().map(({ name, parentIds, fileCount }) => ({ name, parentIds, fileCount })),
+    ).toEqual([
+      { name: 'AC/DC', parentIds: [], fileCount: 1 },
+      { name: 'trips/2024/Japan', parentIds: [], fileCount: 1 },
+    ]);
+  });
+
+  it('exports a name with the characters nobody sees it holds, and imports it back as the tag it reads as', async () => {
+    const photo = library.addFile('photo.jpg', { fingerprint: PRINT });
+    // A name pasted from a web page with a soft hyphen, and a Persian word whose letters a
+    // zero-width non-joiner shapes.
+    const shaped = '\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645';
+    library.tags.addToFiles([photo], ['Bor\u00ADdeaux', shaped]);
+
+    expect(await exporter.export(destination, APP)).toMatchObject({ files: 1, tags: 2 });
+    // As the library spells them.
+    expect((await entriesOf()).map((entry) => entry['tags'])).toEqual([['Bor\u00ADdeaux', shaped]]);
+    const read = await readBack();
+    expect(read.problems).toEqual([]);
+    expect(read.entries[0]?.tags).toEqual(['Bor\u00ADdeaux', shaped]);
+
+    // Meanwhile the file lost its tags, which went with it, and the library has the first under
+    // the name as it reads.
+    library.tags.removeFromFiles(
+      [photo],
+      library.tags.forFile(photo).map((tag) => tag.id),
+    );
+    const bordeaux = library.addTag('Bordeaux');
+    // One tag to make: the other is the tag there is, which keeps its spelling.
+    expect(await restore([photo])).toMatchObject({ assignments: 2, files: 1, newTags: 1 });
+    expect(library.tags.forFile(photo).map((tag) => tag.name)).toEqual(['Bordeaux', shaped]);
+    expect(library.tags.forFile(photo)).toContainEqual({ id: bordeaux, name: 'Bordeaux' });
+    expect(library.tags.count()).toBe(2);
   });
 
   it('refuses, before saving it, an export larger than its import reads', async () => {
@@ -526,7 +626,7 @@ describe('TagExporter', () => {
     );
     const meme = library.addFile('cat.jpg', { root: memes, fingerprint: '8'.repeat(32) });
     const other = library.addFile('dog.jpg', { root: more, fingerprint: '9'.repeat(32) });
-    library.tags.addToFiles(photos, ['trips/japan']);
+    library.tags.addToFiles(photos, ['Japan']);
     library.tags.addToFiles([meme, other], ['funny']);
 
     expect(await exporter.export(destination, APP)).toMatchObject({ files: 5 });
@@ -534,9 +634,9 @@ describe('TagExporter', () => {
 
     const ids = [...photos, meme, other];
     expect(await restore(ids)).toMatchObject({ assignments: 5, files: 5, notFound: 0 });
-    expect(library.tags.pathsForFiles(ids)).toEqual(
+    expect(library.tags.namesForFiles(ids)).toEqual(
       new Map<number, string[]>([
-        ...photos.map((id): [number, string[]] => [id, ['trips/japan']]),
+        ...photos.map((id): [number, string[]] => [id, ['Japan']]),
         [meme, ['funny']],
         [other, ['funny']],
       ]),
@@ -566,7 +666,7 @@ describe('TagExporter', () => {
       fileId: null,
     });
     library.files.setFingerprint({ id, ...file }, PRINT);
-    library.tags.addToFiles([id], ['scans/1998']);
+    library.tags.addToFiles([id], ['scans 1998']);
 
     expect(await exporter.export(destination, APP)).toMatchObject({ files: 1 });
     const [entry] = await entriesOf();
@@ -580,7 +680,7 @@ describe('TagExporter', () => {
     ]);
 
     expect(await restore([id])).toMatchObject({ assignments: 1, files: 1, notFound: 0 });
-    expect(library.tags.pathsForFiles([id])).toEqual(new Map([[id, ['scans/1998']]]));
+    expect(library.tags.namesForFiles([id])).toEqual(new Map([[id, ['scans 1998']]]));
   });
 
   it('refuses, and writes nothing, an export whose header its import would refuse', async () => {
@@ -741,7 +841,7 @@ describe('TagExporter', () => {
 
   it('writes every byte when the disk takes only part of each write', async () => {
     const ids = Array.from({ length: 3 }, (_, index) => library.addFile(`${index}.jpg`));
-    library.tags.addToFiles(ids, ['trips/2024']);
+    library.tags.addToFiles(ids, ['Japan 2024']);
     onWrites(
       (file) => file === destination || inExports(file),
       (real, _call, data, offset, length) => real(data, offset, Math.min(length, 7)),
@@ -956,4 +1056,9 @@ describe('TagExporter', () => {
 /** A failure as the file system reports it. */
 function systemError(code: string): NodeJS.ErrnoException {
   return Object.assign(new Error(code), { code });
+}
+
+/** How many of the names given to `addToFiles` the library took, tagging the files with them. */
+function tagged(outcomes: readonly TagAddOutcome[]): number {
+  return outcomes.filter((outcome) => outcome.status === 'added').length;
 }

@@ -39,7 +39,7 @@ describe('TrashGuard', () => {
     }).checkLibrary();
   };
   const idOf = (absolute: string): number => library.files.findByPath(absolute)?.id ?? 0;
-  const tagsOf = (id: number): string[] => library.tags.forFile(id).map((tag) => tag.path);
+  const tagsOf = (id: number): string[] => library.tags.forFile(id).map((tag) => tag.name);
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'sg-tag-trash-'));

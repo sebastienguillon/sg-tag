@@ -93,4 +93,62 @@ export const MIGRATIONS: readonly string[] = [
   CREATE INDEX files_unprinted ON files (mtime_ms)
     WHERE fingerprint IS NULL AND missing_since IS NULL AND thumb_state != 0;
   `,
+
+  /* sql */ `
+  -- Tags stop being '/'-separated paths: a tag has one name, any number of aliases and any number
+  -- of parent tags. The tags a library had are not carried over.
+  --
+  -- Dropping a table deletes its rows first. A tag deleted took the tags below it with it, one
+  -- level of cascade for each level of tags: past a thousand, SQLite gives up. So the parents go
+  -- first, then file_tags, the only other table that refers to a tag.
+  UPDATE tags SET parent_id = NULL;
+  DROP TABLE file_tags;
+  DROP TABLE tags;
+  -- The latest tags export wrote tags as paths and can no longer be imported: its record goes.
+  DELETE FROM settings WHERE key = 'lastTagExport';
+
+  -- A tag made or edited on purpose (kept = 1) stays until it is deleted; one made by tagging a
+  -- file (kept = 0) goes with its last file.
+  CREATE TABLE tags (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,  -- never given again once its tag is deleted
+    kept        INTEGER NOT NULL DEFAULT 0 CHECK (kept IN (0, 1)),
+    created_at  INTEGER NOT NULL
+  ) STRICT;
+
+  -- The name of each tag (exactly one row with is_alias = 0) and its aliases, in one namespace:
+  -- a key belongs to exactly one tag.
+  CREATE TABLE tag_names (
+    key       TEXT    PRIMARY KEY,                  -- identity: lower-case, nothing unseen (tagKey)
+    fold      TEXT    NOT NULL,                     -- key without accents (tagFold), for search
+    name      TEXT    NOT NULL CHECK (name <> ''),  -- as typed, normalised (normalizeTagName)
+    tag_id    INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    is_alias  INTEGER NOT NULL CHECK (is_alias IN (0, 1))
+  ) STRICT;
+
+  -- No tag has two names. Checked row by row: an alias takes the place of the name in two
+  -- statements, the name made an alias first.
+  CREATE UNIQUE INDEX tag_names_primary ON tag_names (tag_id) WHERE is_alias = 0;
+  -- The aliases of one tag, and the rows to delete with it, without reading every name.
+  CREATE INDEX tag_names_tag  ON tag_names (tag_id, is_alias);
+  CREATE INDEX tag_names_fold ON tag_names (fold);
+
+  -- A tag is below each of its parents. These links never form a loop: that is checked before
+  -- one is added, since the schema cannot.
+  CREATE TABLE tag_parents (
+    tag_id     INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    parent_id  INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (tag_id, parent_id),
+    CHECK (tag_id <> parent_id)
+  ) STRICT, WITHOUT ROWID;
+
+  CREATE INDEX tag_parents_parent ON tag_parents (parent_id, tag_id);
+
+  CREATE TABLE file_tags (
+    file_id  INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    tag_id   INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (file_id, tag_id)
+  ) STRICT, WITHOUT ROWID;
+
+  CREATE INDEX file_tags_tag ON file_tags (tag_id, file_id);
+  `,
 ];

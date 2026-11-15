@@ -107,7 +107,7 @@ describe('VideoPreview', () => {
     host.querySelector<HTMLButtonElement>('button.play')?.click();
     await fixture.whenStable();
 
-    await show({ ...clip, tags: [{ id: 1, path: 'trips' }] });
+    await show({ ...clip, tags: [{ id: 1, name: 'trips' }] });
     expect(host.querySelector('video')).not.toBeNull();
 
     await show({ ...clip, id: 9 });

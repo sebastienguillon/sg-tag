@@ -9,14 +9,19 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import type { Tag } from '@shared/model';
+import { describeTagNameProblem, normalizeTagName } from '@shared/tag-names';
 import { TagsStore } from '../../core/tags-store';
 import { Icon } from '../../ui/icon/icon';
 
 let nextId = 0;
 
 /**
- * Tag entry with autocompletion (ARIA combobox). Enter or comma adds; Tab completes the highlighted
- * suggestion so that `/` can continue into a sub-tag.
+ * Tag entry with autocompletion (ARIA combobox). Enter or comma adds the highlighted suggestion,
+ * or what is typed when none is highlighted; Tab is left alone, and moves the focus on.
+ *
+ * A text that cannot be the name of a tag is not added: it stays in the field to be corrected, and
+ * the field says why.
  */
 @Component({
   selector: 'app-tag-input',
@@ -27,16 +32,46 @@ let nextId = 0;
 export class TagInput {
   private readonly tags = inject(TagsStore);
 
-  /** Tag paths already applied, left out of suggestions. */
-  readonly exclude = input<ReadonlySet<string>>(new Set());
+  /** Ids of the tags already applied, left out of suggestions. */
+  readonly exclude = input<ReadonlySet<number>>(new Set());
+  /** A name to add, as a tag stores it (`normalizeTagName`). */
   readonly add = output<string>();
 
   private readonly input = viewChild.required<ElementRef<HTMLInputElement>>('input');
-  protected readonly listId = `tag-suggestions-${nextId++}`;
+  private readonly id = nextId++;
+  protected readonly listId = `tag-suggestions-${this.id}`;
+  /** Ties the field to the sentence that says why its text is refused. */
+  protected readonly problemId = `tag-problem-${this.id}`;
   protected readonly text = signal('');
   protected readonly focused = signal(false);
   protected readonly suggestions = computed(() => this.tags.suggest(this.text(), this.exclude()));
-  protected readonly active = linkedSignal({ source: this.suggestions, computation: () => -1 });
+  /**
+   * The place of the highlighted suggestion in the list, -1 when none is.
+   *
+   * The suggestions are worked out again without any typing, each time the tags of the library or
+   * of the selection are read again. The highlight then stays on its tag, wherever that tag now is
+   * in the list: Enter would otherwise add the letters typed in place of the tag chosen. It goes
+   * when the text changes, or when its tag is no longer suggested.
+   */
+  protected readonly active = linkedSignal<
+    { readonly text: string; readonly suggestions: readonly Tag[] },
+    number
+  >({
+    source: () => ({ text: this.text(), suggestions: this.suggestions() }),
+    computation: ({ text, suggestions }, previous) => {
+      const highlighted =
+        previous?.source.text === text ? previous.source.suggestions[previous.value] : undefined;
+      return highlighted ? suggestions.findIndex((tag) => tag.id === highlighted.id) : -1;
+    },
+  });
+  /**
+   * Why the text in the field cannot be the name of a tag, once it was asked to be added. Goes as
+   * soon as the text changes: it is said of the text as it was.
+   */
+  protected readonly problem = linkedSignal<string, string | null>({
+    source: this.text,
+    computation: () => null,
+  });
   protected readonly expanded = computed(() => this.focused() && this.suggestions().length > 0);
   protected readonly activeId = computed(() =>
     this.expanded() && this.active() >= 0 ? `${this.listId}-${this.active()}` : null,
@@ -65,18 +100,10 @@ export class TagInput {
           event.preventDefault();
         }
         break;
-      case 'Tab': {
-        const suggestion = this.suggestions()[Math.max(0, this.active())];
-        if (suggestion && this.text().trim() !== '' && this.text() !== suggestion.path) {
-          this.text.set(suggestion.path);
-          event.preventDefault();
-        }
-        break;
-      }
       case 'Enter':
       case ',':
         event.preventDefault();
-        this.commit(this.suggestions()[this.active()]?.path ?? this.text());
+        this.commit(this.suggestions()[this.active()]?.name ?? this.text());
         break;
       case 'Escape':
         if (this.text() !== '') {
@@ -90,11 +117,20 @@ export class TagInput {
     }
   }
 
-  protected commit(path: string): void {
-    const value = path.trim();
-    if (value !== '') {
-      this.add.emit(value);
+  /** Adds `typed` when it can be the name of a tag, and empties the field; says why otherwise. */
+  protected commit(typed: string): void {
+    // Nothing typed is no name to refuse: the field loses its spaces, without a word.
+    if (typed.trim() === '') {
+      this.text.set('');
+      return;
     }
-    this.text.set('');
+    const check = normalizeTagName(typed);
+    if (check.ok) {
+      this.add.emit(check.name);
+      this.text.set('');
+    } else {
+      // The text stays where it can be corrected: emptied, it would have to be typed all over.
+      this.problem.set(describeTagNameProblem(check.problem));
+    }
   }
 }

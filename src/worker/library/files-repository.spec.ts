@@ -34,7 +34,7 @@ describe('FilesRepository', () => {
       missing: false,
     });
     expect(files.details(copy, new Set())).toBeNull();
-    expect(tags.forFile(original).map((tag) => tag.path)).toEqual(['keep', 'new']);
+    expect(tags.forFile(original).map((tag) => tag.name)).toEqual(['keep', 'new']);
   });
 
   it('stores what was read from a file only if the file has not changed since', () => {

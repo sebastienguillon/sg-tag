@@ -68,7 +68,11 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   (H.264, VP9, AV1, and HEVC where the platform decodes it, in MP4, MOV, MKV or WebM). Guardrail:
   **SG Tag previews; real playback belongs to the system player.** No transcoding and no player
   features beyond the built-in controls; other formats go to Open.
-- Hierarchical tags separated by `/` (`trips/2024/japan`); `tag:trips` matches everything below.
+- Tags are plain names: letter case never distinguishes two tags, accents do, and search ignores
+  both (`tag:ete` finds the files tagged `Été`). Characters nobody sees (a zero-width space or a
+  soft hyphen pasted from a web page) never distinguish two tags either, and search ignores them
+  too. A name cannot contain a comma or a double quote, nor start with `=`; `/` is an ordinary
+  character in it.
 - Search syntax: free text, `"exact phrase"`, `tag:`, `type:`, `ext:`, `size:`, `in:`, `is:`
   (`untagged`, `tagged`, `missing`, `offline`, `duplicate`), and a leading `-` to exclude.
 - Keyboard: ⌘/Ctrl-F or `/` to search, `T` to tag the selection, ⌘/Ctrl-, for Settings, and grid
@@ -81,12 +85,15 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   ffmpeg.org for its latest release and links to its download page when that is newer. SG Tag
   contacts no website otherwise. A tool not found gets a link to install FFmpeg.
 - Tags export and import: a tags export lists every tagged file (missing and offline ones included)
-  with its tags, except tags past its limits (length, depth, combining marks in a row, 1,000 per
-  file), which it leaves out and counts. It holds up to 256 MiB (about 670,000 tagged files) and
-  10,000 library folders (tens at the longest paths), and Export tags… refuses a larger one rather
-  than save a file Import tags… would refuse. Importing it only adds tags, finds files by their
-  content even if they were renamed, moved, or their library folder has another path, and shows what
-  it will add before writing anything.
+  with its tags, except those past 1,000 on one file, which it leaves out and counts. It holds up to
+  256 MiB (about 670,000 tagged files) and 10,000 library folders (tens at the longest paths), and
+  Export tags… refuses a larger one rather than save a file Import tags… would refuse. Importing it
+  only adds tags, finds files by their content even if they were renamed, moved, or their library
+  folder has another path, and shows what it will add before writing anything. Tags exports are file
+  version 2: one made by an earlier version of SG Tag (version 1) can no longer be imported. A
+  library last opened by such a version (2026.10.0-alpha.3 or earlier) loses its tags the first time
+  a later version opens it, and those versions can no longer use it: only a copy of the data folder
+  made beforehand keeps its tags.
 - Terminology: _library folders_ (the roots the user adds), _data folder_, _tags_, _tags export_,
   _selection_, _details panel_, _missing_ and _offline_ files, _indexing_.
 - Heavy work (indexing, watching, thumbnails, database) runs in a separate indexer process, never
