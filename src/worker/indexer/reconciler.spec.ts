@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RootRecord } from '../library/roots-repository';
+import { renameOver } from '../testing/rename-over';
 import type { TestLibrary } from '../testing/test-library';
 import { createTestLibrary } from '../testing/test-library';
 import type { DiskFile } from './crawler';
@@ -613,7 +614,7 @@ describe('Reconciler', () => {
 
     // Another file at its path is not it.
     await write('c.jpg');
-    await rename(file('c.jpg'), file('b.jpg'));
+    await renameOver(file('c.jpg'), file('b.jpg'));
     expect((await reconciler.forget(b)).deleted).toEqual([b]);
   });
 

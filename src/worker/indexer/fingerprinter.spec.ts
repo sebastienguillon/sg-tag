@@ -9,7 +9,15 @@ import { ThumbState } from '../library/files-repository';
 import type { RootRecord } from '../library/roots-repository';
 import type { TestLibrary } from '../testing/test-library';
 import { createTestLibrary } from '../testing/test-library';
+import type * as Fingerprint from './fingerprint';
+import { fingerprint } from './fingerprint';
 import { Fingerprinter } from './fingerprinter';
+
+// The real `fingerprint`, watched: the order in which the files start to be read.
+vi.mock('./fingerprint', async (importOriginal) => {
+  const original = await importOriginal<typeof Fingerprint>();
+  return { ...original, fingerprint: vi.fn(original.fingerprint) };
+});
 
 /** Every file holds its own name, padded to the same size. */
 const SIZE = 64;
@@ -63,6 +71,9 @@ describe('Fingerprinter', () => {
   /** Names of the files fingerprinted so far, in order. */
   const stored = (): string[] =>
     setFingerprint.mock.calls.map(([target]) => path.basename(target.path));
+  /** Names of the files that started to be read so far, in order. */
+  const started = (): string[] =>
+    vi.mocked(fingerprint).mock.calls.map(([filePath]) => path.basename(filePath));
   const fingerprintOf = (relative: string): string | null =>
     library.files.findByPath(file(relative))?.fingerprint ?? null;
 
@@ -72,6 +83,7 @@ describe('Fingerprinter', () => {
     root = library.roots.insert(dir);
     offline = new Set();
     clock = 1_000;
+    vi.mocked(fingerprint).mockClear();
     setFingerprint = vi.spyOn(library.files, 'setFingerprint');
     fingerprinter = new Fingerprinter({
       files: library.files,
@@ -136,7 +148,12 @@ describe('Fingerprinter', () => {
       expect(stored()).toHaveLength(6);
     });
     expect(stored()).toContain('tagged.jpg');
-    expect(stored().at(-1)).toBe('1.jpg');
+    // Ahead of the background files that waited: it starts to be read before the last of them.
+    // Which is read to the end first is left to the system. The tagged file and a background file
+    // are read at once, and under load Windows was seen to take 20 to 75 ms to open the tagged
+    // file while the four files that waited were read in 1 to 6 ms each: its fingerprint was then
+    // stored last, though it had started to be read second.
+    expect(started().at(-1)).toBe('1.jpg');
     expect(fingerprintOf('untagged.jpg')).toBeNull();
   });
 
