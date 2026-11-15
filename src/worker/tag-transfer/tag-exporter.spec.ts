@@ -167,6 +167,7 @@ describe('TagExporter', () => {
       whenIndexed: () => Promise.resolve(),
       onTagged: () => undefined,
       onImported: () => undefined,
+      onDefined: () => undefined,
       onProgress: () => undefined,
       read: () => Promise.reject(new Error('Not read.')),
     });
@@ -214,6 +215,7 @@ describe('TagExporter', () => {
       files: 3,
       missing: 1,
       tags: 2,
+      definitions: 0,
       leftOut: 0,
     });
 
@@ -250,7 +252,7 @@ describe('TagExporter', () => {
         missing: true,
       },
       { ...defaults, root: 0, rel: 'away.jpg', path: '/drive/away.jpg', size: 30, mtimeMs: 7 },
-      { end: true, files: 3 },
+      { end: true, files: 3, tags: 0 },
     ]);
     // Neither missing nor offline files are read.
     expect(reads).toEqual([]);
@@ -379,7 +381,7 @@ describe('TagExporter', () => {
     expect(lines.slice(1, -1).map((entry) => [entry['rel'], entry['tags']])).toEqual([
       ['kept.jpg', ['Ana']],
     ]);
-    expect(lines.at(-1)).toEqual({ end: true, files: 1 });
+    expect(lines.at(-1)).toEqual({ end: true, files: 1, tags: 0 });
     // A line without a tag is one that an import reports as a problem.
     const read = await readBack();
     expect(read.problems).toEqual([]);
@@ -774,11 +776,51 @@ describe('TagExporter', () => {
     expect(existsSync(path.join(dir, 'other.jsonl'))).toBe(false);
   });
 
-  it('refuses to export when no file is tagged, and creates nothing', async () => {
+  it('exports the tags made on purpose with their aliases and parent tags, before the files', async () => {
+    const photo = library.addFile('photo.jpg', { size: 10, mtimeMs: 5 });
+    library.addTag('Paris', { aliases: ['Paname'], parents: ['France'] });
+    library.addTag('Unused');
+    library.tags.addToFiles([photo], ['Paris', 't']);
+
+    expect(await exporter.export(destination, APP)).toMatchObject({
+      files: 1,
+      // France, Paris, Unused and t.
+      tags: 4,
+      definitions: 3,
+      leftOut: 0,
+    });
+
+    const lines = await linesOf();
+    expect(lines.slice(1, 4)).toEqual([
+      { tag: 'France' },
+      { tag: 'Paris', aliases: ['Paname'], parents: ['France'] },
+      { tag: 'Unused' },
+    ]);
+    expect(lines[4]).toMatchObject({ rel: 'photo.jpg', tags: ['Paris', 't'] });
+    expect(lines.at(-1)).toEqual({ end: true, files: 1, tags: 3 });
+  });
+
+  it('exports the tags of a library where no file is tagged', async () => {
+    library.addFile('photo.jpg');
+    library.addTag('Unused', { aliases: ['Spare'] });
+
+    expect(await exporter.export(destination, APP)).toMatchObject({
+      files: 0,
+      tags: 1,
+      definitions: 1,
+    });
+    expect((await linesOf()).slice(1)).toEqual([
+      { tag: 'Unused', aliases: ['Spare'] },
+      { end: true, files: 0, tags: 1 },
+    ]);
+    expect(settings.lastTagExport()).toMatchObject({ files: 0 });
+  });
+
+  it('refuses to export when there is no tag, and creates nothing', async () => {
     library.addFile('photo.jpg');
 
     await expect(exporter.export(destination, APP)).rejects.toThrow(
-      'Nothing to export yet: no file is tagged.',
+      'Nothing to export yet: there is no tag.',
     );
     expect(existsSync(exportsDir)).toBe(false);
     expect(existsSync(destination)).toBe(false);

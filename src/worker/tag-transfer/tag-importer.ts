@@ -1,6 +1,8 @@
 import { createLogger } from '@shared/log';
 import type {
+  TagDefinitionCounts,
   TagImportAdditions,
+  TagImportDefinitions,
   TagImportFolder,
   TagImportItem,
   TagImportMissedItem,
@@ -23,7 +25,7 @@ import type {
 } from '../library/files-repository';
 import { caseInsensitive, pathSegments, rootsOverlap } from '../library/paths';
 import type { RootRecord, RootsRepository } from '../library/roots-repository';
-import type { TagsRepository } from '../library/tags-repository';
+import type { AppliedDefinitions, TagDefinition, TagsRepository } from '../library/tags-repository';
 import { eachInSlices, Slicer, yieldNow } from './slices';
 import type { ImportEntry, ParsedTagFile } from './tag-file';
 import { exportedPath, readTagFile } from './tag-file';
@@ -51,6 +53,18 @@ const NAME_BATCH_UNITS = 4_096;
 const MAX_MOVED_ITEMS = 100;
 const MAX_CHANGED_ITEMS = 100;
 const MAX_MISSED_ITEMS = 500;
+/** Tags, aliases, links and what is left out of them that a preview lists, by kind. */
+const MAX_DEFINITION_ITEMS = 100;
+
+/** What a tags export without tag lines describes. */
+const NO_DEFINITIONS: AppliedDefinitions = {
+  named: new Map(),
+  created: [],
+  aliases: [],
+  links: [],
+  knownAs: [],
+  skipped: [],
+};
 
 /** Top folders where macOS and Linux mount, on demand, the network share a path names. */
 const NETWORK_MOUNTS = new Set(['net', 'network']);
@@ -73,6 +87,8 @@ export interface TagImporterOptions {
    * chunks added before the error stay.
    */
   readonly onImported: (ids: readonly number[]) => void;
+  /** Applying an import made tags, or gave tags aliases or parent tags, before tagging files. */
+  readonly onDefined: () => void;
   /** `progress` changed. */
   readonly onProgress: () => void;
   /** Whether names that differ only in case name one file (macOS, Windows); tests set it. */
@@ -84,7 +100,8 @@ export interface TagImporterOptions {
 /**
  * What a name of a tags export stands for in the library: the tag that it is the name or an alias
  * of, by its id, or else a tag that the library lacks, by the `tagKey` of the name. Two names of
- * one tag stand for the same.
+ * one tag stand for the same. A name that the tag lines describe stands for what they make it
+ * stand for (`AppliedDefinitions.named`).
  */
 type NamedTag = number | string;
 
@@ -139,11 +156,13 @@ type Summary = Pick<
  * against the library and keeps what importing would add; `apply` adds exactly that, to the files
  * still where and what they were then. One tags export is open at a time.
  *
- * A tags export names the tags of each file. A name stands for the tag of the library that has it
- * as its name or as an alias, or for a tag to make when none has. Files are compared by tag, so a
- * file is not given a tag that it has under another of its names. What the names stand for is
- * looked up for the preview and again when importing: in between, tags may be renamed, merged or
- * deleted, and aliases added or removed.
+ * A tags export describes tags (its tag lines: aliases and parent tags) and names the tags of each
+ * file. What its tag lines describe is added first, as `TagsRepository.applyDefinitions` adds it:
+ * tags made, aliases and parent links the library lacks. A name then stands for the tag the tag
+ * lines make it stand for, or else the tag of the library that has it as its name or as an alias,
+ * or else a tag to make. Files are compared by tag, so a file is not given a tag that it has under
+ * another of its names. All this is worked out for the preview, writing nothing, and again when
+ * importing: in between, tags may be renamed, merged or deleted, and aliases added or removed.
  */
 export class TagImporter {
   private readonly options: TagImporterOptions;
@@ -198,10 +217,10 @@ export class TagImporter {
         },
       });
       task.signal.throwIfAborted();
-      const { header, entries, tags, invalid, problems } = parsed;
+      const { header, entries, definitions, tagCount, invalid, problems } = parsed;
       log.info(
-        `Read a tags export of ${entries.length} files in ` +
-          `${Math.round(performance.now() - started)} ms (${invalid} lines not read in full)`,
+        `Read a tags export of ${entries.length} files and ${definitions.length} tags described ` +
+          `in ${Math.round(performance.now() - started)} ms (${invalid} lines not read in full)`,
       );
       const token = randomUUID();
       this.session = { token, parsed, plan: null };
@@ -211,7 +230,7 @@ export class TagImporter {
         exportedAt: header.exportedAt,
         platform: header.platform,
         files: entries.length,
-        tags: tags.size,
+        tags: tagCount,
         invalid,
         problems,
       };
@@ -252,18 +271,25 @@ export class TagImporter {
       });
       const folders = await this.foldersOf(parsed, match, roots, signal);
       const { summary, found } = await summarize(parsed, match, slicer);
+      if (slicer.due) {
+        await slicer.yield();
+      }
+      // One transaction, which a dry run writes nothing in: what the tag lines would add.
+      const defined = this.define(parsed.definitions, true);
       const { targets, additions, additionsWithChanged } = await this.targetsOf(
         found,
         parsed.tags,
+        defined.named,
         slicer,
       );
+      const definitions = await this.describe(defined, slicer);
       const plan: Plan = {
         id: ++this.lastPlanId,
         notFound: Object.values(summary.notFound).reduce((sum, count) => sum + count, 0),
         targets,
       };
       session.plan = plan;
-      return { planId: plan.id, ...summary, folders, additions, additionsWithChanged };
+      return { planId: plan.id, ...summary, folders, additions, additionsWithChanged, definitions };
     } finally {
       this.settle(task);
     }
@@ -285,7 +311,7 @@ export class TagImporter {
     this.refuseWhileApplying();
     this.importing = true;
     try {
-      const result = await this.add(plan, includeChanged);
+      const result = await this.add(plan, includeChanged, session.parsed.definitions);
       // Importing again means opening the tags export again.
       this.session = null;
       return result;
@@ -342,17 +368,62 @@ export class TagImporter {
   }
 
   /**
+   * What the tag lines of `definitions` add, as `TagsRepository.applyDefinitions` adds it: written
+   * unless `dryRun`. Nothing to do for a tags export without tag lines.
+   */
+  private define(definitions: readonly TagDefinition[], dryRun: boolean): AppliedDefinitions {
+    return definitions.length === 0
+      ? NO_DEFINITIONS
+      : this.options.tags.applyDefinitions(definitions, dryRun);
+  }
+
+  /**
+   * What a preview says of what the tag lines add: how many of each, and the first of each. For a
+   * link that puts a tag of the library below another, how many files a search for the parent tag
+   * starts to find, worked out one link at a time, the event loop running between two once a slice
+   * of `slicer` is spent.
+   */
+  private async describe(
+    defined: AppliedDefinitions,
+    slicer: Slicer,
+  ): Promise<TagImportDefinitions> {
+    const linkItems: TagImportDefinitions['linkItems'][number][] = [];
+    for (const { tag, parent, tagId, parentId } of defined.links.slice(0, MAX_DEFINITION_ITEMS)) {
+      if (slicer.due) {
+        await slicer.yield();
+      }
+      linkItems.push({
+        tag,
+        parent,
+        newlyFound: tagId === null ? null : this.options.tags.newlyFound(tagId, parentId),
+      });
+    }
+    return {
+      ...countsOf(defined),
+      createdItems: defined.created.slice(0, MAX_DEFINITION_ITEMS),
+      aliasItems: defined.aliases.slice(0, MAX_DEFINITION_ITEMS),
+      linkItems,
+      knownAs: defined.knownAs.length,
+      knownAsItems: defined.knownAs.slice(0, MAX_DEFINITION_ITEMS),
+      skippedItems: defined.skipped.slice(0, MAX_DEFINITION_ITEMS),
+    };
+  }
+
+  /**
    * The tags of a tags export that the library has: by `tagKey`, the id of the tag that has the
-   * name, as its name or as an alias. `names` are those of the tags export, by `tagKey`. They are
-   * looked up a batch at a time (`nameBatches`), the event loop running between two batches once a
-   * slice of `slicer` is spent: there may be a million of them.
+   * name, as its name or as an alias. `names` are those of the tags export, by `tagKey`, less those
+   * that its tag lines describe (`named`). They are looked up a batch at a time (`nameBatches`), the
+   * event loop running between two batches once a slice of `slicer` is spent: there may be a
+   * million of them.
    */
   private async knownTags(
     names: ReadonlyMap<string, string>,
+    named: ReadonlyMap<string, NamedTag>,
     slicer: Slicer,
   ): Promise<Map<string, number>> {
     const known = new Map<string, number>();
-    for (const batch of nameBatches(names)) {
+    const undescribed = new Map([...names].filter(([key]) => !named.has(key)));
+    for (const batch of nameBatches(undescribed)) {
       // The work before may have spent the slice.
       if (slicer.due) {
         await slicer.yield();
@@ -370,15 +441,17 @@ export class TagImporter {
 
   /**
    * The tags each file found lacks, and what adding them adds, without the changed files and with
-   * them. `names` are those of the tags export, by `tagKey`: what they stand for is looked up once
-   * (`knownTags`), and each file is compared by tag, so a name or an alias of a tag that the file
-   * has adds nothing, and a tag that it lacks is counted once, whatever names of it the tags export
+   * them. `names` are those of the tags export, by `tagKey`: what they stand for is what its tag
+   * lines make them stand for (`named`), or else what the library says, looked up once
+   * (`knownTags`). Each file is compared by tag, so a name or an alias of a tag that the file has
+   * adds nothing, and a tag that it lacks is counted once, whatever names of it the tags export
    * has. Yields between two tags once a slice of `slicer` is spent: a chunk of files can bring a
    * million tags, and a file found for many files of the tags export the tags of all of them.
    */
   private async targetsOf(
     found: readonly Found[],
     names: ReadonlyMap<string, string>,
+    named: ReadonlyMap<string, NamedTag>,
     slicer: Slicer,
   ): Promise<{
     targets: Map<number, Target>;
@@ -386,9 +459,11 @@ export class TagImporter {
     additionsWithChanged: TagImportAdditions;
   }> {
     const { tags } = this.options;
-    const known = await this.knownTags(names, slicer);
-    const additions = new AdditionsCount();
-    const withChanged = new AdditionsCount();
+    const known = await this.knownTags(names, named, slicer);
+    // Tags that the tag lines make: counted with them, not as new tags of files.
+    const described = new Set([...named.values()].filter((tag) => typeof tag === 'string'));
+    const additions = new AdditionsCount(described);
+    const withChanged = new AdditionsCount(described);
     const targets = new Map<number, Target>();
     for (let start = 0; start < found.length; start += CHUNK_SIZE) {
       // The work before may have spent the slice.
@@ -404,7 +479,7 @@ export class TagImporter {
         const gets = new Set<NamedTag>();
         const lacking: string[] = [];
         for (const [key, name] of brought) {
-          const tag = known.get(key) ?? key;
+          const tag = named.get(key) ?? known.get(key) ?? key;
           if (!had.has(tag)) {
             lacking.push(name);
             if (!gets.has(tag)) {
@@ -431,9 +506,21 @@ export class TagImporter {
     return { targets, additions: additions.result, additionsWithChanged: withChanged.result };
   }
 
-  /** Adds the tags of `plan`, a chunk of files at a time, each chunk kept once added. */
-  private async add(plan: Plan, includeChanged: boolean): Promise<TagImportResult> {
+  /**
+   * Adds what the tag lines `definitions` describe, in one transaction, then the tags of `plan`, a
+   * chunk of files at a time, each chunk kept once added.
+   */
+  private async add(
+    plan: Plan,
+    includeChanged: boolean,
+    definitions: readonly TagDefinition[],
+  ): Promise<TagImportResult> {
     const started = performance.now();
+    const defined = this.define(definitions, false);
+    const counts = countsOf(defined);
+    if (counts.created + counts.aliases + counts.links > 0) {
+      this.options.onDefined();
+    }
     const ids = [...plan.targets]
       .filter(([, target]) => includeChanged || !target.changed)
       .map(([id]) => id)
@@ -447,7 +534,9 @@ export class TagImporter {
       for (let start = 0; start < ids.length; start += CHUNK_SIZE) {
         const chunk = ids.slice(start, start + CHUNK_SIZE);
         // One transaction: no indexing can change these files between the check and the writes.
-        const added = this.options.files.transaction(() => this.addChunk(plan, chunk));
+        const added = this.options.files.transaction(() =>
+          this.addChunk(plan, chunk, defined.named),
+        );
         assignments += added.assignments;
         files += added.files;
         newTags += added.newTags;
@@ -465,10 +554,12 @@ export class TagImporter {
     }
     const skipped = ids.length - fileIds.length;
     log.info(
-      `Imported ${assignments} tags to ${files} files in ` +
-        `${Math.round(performance.now() - started)} ms (${skipped} left out)`,
+      `Imported ${assignments} tags to ${files} files, made ${counts.created} tags and added ` +
+        `${counts.aliases} aliases and ${counts.links} parent links in ` +
+        `${Math.round(performance.now() - started)} ms (${skipped} files and ` +
+        `${counts.skipped} aliases or links left out)`,
     );
-    return { assignments, files, newTags, skipped, notFound: plan.notFound };
+    return { assignments, files, newTags, skipped, notFound: plan.notFound, definitions: counts };
   }
 
   /**
@@ -482,6 +573,7 @@ export class TagImporter {
   private addChunk(
     plan: Plan,
     ids: readonly number[],
+    described: ReadonlyMap<string, NamedTag>,
   ): TagImportAdditions & { readonly alive: number[] } {
     const { files, tags } = this.options;
     const alive = files
@@ -490,7 +582,10 @@ export class TagImporter {
       .map((row) => row.id)
       .sort((a, b) => a - b);
     const planned = alive.map((id) => ({ id, names: plan.targets.get(id)?.additions ?? [] }));
-    const named = this.namedTags(planned.flatMap(({ names }) => names));
+    const named = this.namedTags(
+      planned.flatMap(({ names }) => names),
+      described,
+    );
     const current = tags.idsForFiles(alive);
     // By tag, for the files still as they were only: no tag is created for nothing. Each is added
     // under the first name planned for it.
@@ -521,20 +616,37 @@ export class TagImporter {
       }
     }
     const before = tags.count();
-    for (const { name, fileIds } of byTag.values()) {
-      tags.addToFiles(fileIds, [name]);
+    for (const [tag, { name, fileIds }] of byTag) {
+      if (typeof tag === 'number') {
+        tags.attach(fileIds, [tag]);
+      } else {
+        tags.addToFiles(fileIds, [name]);
+      }
     }
     return { alive, assignments, files: gaining, newTags: tags.count() - before };
   }
 
   /**
-   * What each of `names` stands for in the library now: the tag that has it as its name or as an
-   * alias, or else, by its `tagKey`, a tag that the library lacks.
+   * What each of `names` stands for in the library now: the tag that the tag lines made it stand
+   * for (`described`, once they are added), or else the tag that has it as its name or as an alias,
+   * or else, by its `tagKey`, a tag that the library lacks.
    */
-  private namedTags(names: readonly string[]): Map<string, NamedTag> {
+  private namedTags(
+    names: readonly string[],
+    described: ReadonlyMap<string, NamedTag>,
+  ): Map<string, NamedTag> {
     const distinct = [...new Set(names)];
-    const resolved = this.options.tags.resolve(distinct);
-    return new Map(distinct.map((name, index) => [name, resolved[index]?.id ?? tagKey(name)]));
+    const keys = distinct.map(tagKey);
+    const undescribed = distinct.filter((_name, index) => !described.has(keys[index] as string));
+    const resolved = new Map(
+      this.options.tags.resolve(undescribed).map((tag, index) => [undescribed[index], tag]),
+    );
+    return new Map(
+      distinct.map((name, index) => {
+        const key = keys[index] as string;
+        return [name, described.get(key) ?? resolved.get(name)?.id ?? key];
+      }),
+    );
   }
 
   private sessionOf(token: string): Session {
@@ -579,6 +691,12 @@ class AdditionsCount {
   private files = 0;
   /** `tagKey` of the tags that the library lacks, each once. */
   private readonly created = new Set<string>();
+  /** Tags that the tag lines make, by `tagKey`: counted with them, not here. */
+  private readonly described: ReadonlySet<NamedTag>;
+
+  constructor(described: ReadonlySet<NamedTag>) {
+    this.described = described;
+  }
 
   get result(): TagImportAdditions {
     return { assignments: this.assignments, files: this.files, newTags: this.created.size };
@@ -586,11 +704,11 @@ class AdditionsCount {
 
   /**
    * The file gets `tag`, which it lacks. A tag that the library lacks is counted as new once,
-   * however many files get it.
+   * however many files get it, unless the tag lines make it.
    */
   tag(tag: NamedTag): void {
     this.assignments++;
-    if (typeof tag === 'string') {
+    if (typeof tag === 'string' && !this.described.has(tag)) {
       this.created.add(tag);
     }
   }
@@ -599,6 +717,16 @@ class AdditionsCount {
   file(): void {
     this.files++;
   }
+}
+
+/** How many of each thing the tag lines add, and how many are left out. */
+function countsOf(defined: AppliedDefinitions): TagDefinitionCounts {
+  return {
+    created: defined.created.length,
+    aliases: defined.aliases.length,
+    links: defined.links.length,
+    skipped: defined.skipped.length,
+  };
 }
 
 /**

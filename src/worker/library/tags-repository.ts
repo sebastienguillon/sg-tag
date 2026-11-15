@@ -5,6 +5,10 @@ import type {
   TagDetails,
   TagEditError,
   TagEditResult,
+  TagImportAlias,
+  TagImportKnownAs,
+  TagImportLink,
+  TagImportSkip,
   TagRef,
   TagUsage,
 } from '@shared/model';
@@ -257,7 +261,116 @@ function prepareStatements(db: Db) {
     cleanup: db.prepare<[]>(`
       DELETE FROM tags
       WHERE kept = 0 AND NOT EXISTS (SELECT 1 FROM file_tags ft WHERE ft.tag_id = tags.id)`),
+    keptIds: db.prepare<[], { id: number }>('SELECT id FROM tags WHERE kept = 1'),
+    isKept: db.prepare<[number], { kept: number }>('SELECT kept FROM tags WHERE id = ?'),
+    // Files of `@child` and of the tags below it that `@parent` and the tags below it do not have:
+    // those a search for the parent starts to find once `@child` is put below it. Missing files are
+    // left out, as searches leave them out.
+    newlyFound: db.prepare<[{ child: number; parent: number }], { count: number }>(`
+      WITH RECURSIVE
+        belowChild(id) AS (
+          SELECT @child
+          UNION
+          SELECT tp.tag_id FROM tag_parents tp JOIN belowChild b ON tp.parent_id = b.id
+        ),
+        belowParent(id) AS (
+          SELECT @parent
+          UNION
+          SELECT tp.tag_id FROM tag_parents tp JOIN belowParent b ON tp.parent_id = b.id
+        )
+      SELECT COUNT(*) AS count FROM files f
+      WHERE f.missing_since IS NULL
+        AND f.id IN (SELECT ft.file_id FROM file_tags ft WHERE ft.tag_id IN belowChild)
+        AND f.id NOT IN (SELECT ft.file_id FROM file_tags ft WHERE ft.tag_id IN belowParent)`),
   };
+}
+
+/** A tag as a tags export, or another source of tags, describes it. */
+export interface TagDefinition {
+  /** Its name, as written: it need not be normalised. */
+  readonly name: string;
+  readonly aliases: readonly string[];
+  /**
+   * The names of its parent tags: each the name or an alias of another definition, or of a tag of
+   * the library, or else the name of a tag to make.
+   */
+  readonly parents: readonly string[];
+}
+
+/** A parent link that `applyDefinitions` adds, and the tags it joins. */
+export interface DefinedLink extends TagImportLink {
+  /** The id of the tag below, or `null` for a tag that the definitions make. */
+  readonly tagId: number | null;
+  /** The id of the parent tag, or `null` for a tag that the definitions make. */
+  readonly parentId: number | null;
+}
+
+/** What `applyDefinitions` did, or would do in a dry run. */
+export interface AppliedDefinitions {
+  /**
+   * What each name of the definitions stands for, by `tagKey`: the id of its tag, or, in a dry run,
+   * for a tag still to make, the `tagKey` of the name it is made with. The names of their parent
+   * tags are in it, and so are aliases that another tag has: in the definitions, they stand for the
+   * tag they are given to.
+   */
+  readonly named: ReadonlyMap<string, number | string>;
+  /** Names of the tags made, in the order of the definitions. */
+  readonly created: readonly string[];
+  readonly aliases: readonly TagImportAlias[];
+  readonly links: readonly DefinedLink[];
+  readonly knownAs: readonly TagImportKnownAs[];
+  readonly skipped: readonly TagImportSkip[];
+}
+
+/** A tag of the library that a definition stands for. */
+interface LibraryTag {
+  readonly id: number;
+  readonly name: string;
+}
+
+/** A tag that definitions make, by the `tagKey` of its name. */
+interface TagToMake {
+  readonly id: null;
+  readonly key: string;
+  readonly name: string;
+}
+
+/** A tag that a definition stands for: one of the library, or one to make. */
+type DefinedTag = LibraryTag | TagToMake;
+
+/** The definitions that name one tag, gathered, their names normalised. */
+interface DefinitionGroup {
+  readonly name: string;
+  readonly key: string;
+  readonly aliases: string[];
+  readonly parents: string[];
+  /** `tagKey` of its parents, to take each once. */
+  readonly parentKeys: Set<string>;
+}
+
+/** What the library holds that working out what definitions add needs to read. */
+interface LibraryView {
+  /** The tag that `name`, normalised, is the name or an alias of. */
+  readonly find: (name: string) => ResolvedTag | null;
+  readonly aliasCount: (id: number) => number;
+  readonly parentCount: (id: number) => number;
+  readonly hasParent: (id: number, parentId: number) => boolean;
+  /** Every parent link. */
+  readonly links: () => readonly { readonly tagId: number; readonly parentId: number }[];
+}
+
+/** What definitions add, worked out before anything is written (`planDefinitions`). */
+interface DefinitionPlan {
+  /** What each name of the definitions stands for, by `tagKey`. */
+  readonly named: ReadonlyMap<string, DefinedTag>;
+  /** In the order they are made in. */
+  readonly make: readonly TagToMake[];
+  readonly aliases: readonly { readonly tag: DefinedTag; readonly alias: string }[];
+  readonly links: readonly { readonly tag: DefinedTag; readonly parent: DefinedTag }[];
+  /** Tags of the library that definitions stand for or put above another: kept from then on. */
+  readonly keep: readonly LibraryTag[];
+  readonly knownAs: readonly TagImportKnownAs[];
+  readonly skipped: readonly TagImportSkip[];
 }
 
 /**
@@ -719,6 +832,125 @@ export class TagsRepository {
     });
   }
 
+  /**
+   * Every tag made or edited on purpose (`kept = 1`), sorted by name, with its aliases and the
+   * names of its parent tags, each sorted by name: what a tags export says of tags besides the tags
+   * of its files. Read at once, so that each parent named is a tag as it is named.
+   */
+  definitions(): TagDefinition[] {
+    return this.transaction(() => {
+      const names = this.statements.names.all();
+      const nameById = new Map<number, Sortable>();
+      for (const row of names) {
+        if (row.isAlias === 0) {
+          nameById.set(row.tagId, row);
+        }
+      }
+      const kept = new Map<number, { name: Sortable; aliases: Sortable[]; parents: Sortable[] }>();
+      for (const { id } of this.statements.keptIds.all()) {
+        const name = nameById.get(id);
+        if (name) {
+          kept.set(id, { name, aliases: [], parents: [] });
+        }
+      }
+      for (const row of names) {
+        if (row.isAlias === 1) {
+          kept.get(row.tagId)?.aliases.push(row);
+        }
+      }
+      for (const { tagId, parentId } of this.statements.links.all()) {
+        const parent = nameById.get(parentId);
+        if (parent) {
+          kept.get(tagId)?.parents.push(parent);
+        }
+      }
+      return [...kept.values()]
+        .sort((a, b) => byName(a.name, b.name))
+        .map(({ name, aliases, parents }) => ({
+          name: name.name,
+          aliases: aliases.sort(byName).map((alias) => alias.name),
+          parents: parents.sort(byName).map((parent) => parent.name),
+        }));
+    });
+  }
+
+  /**
+   * Adds what `definitions` say of tags, and never removes anything: for importers. One
+   * transaction; with `dryRun`, nothing is written and the answer tells what would be.
+   *
+   * Definitions whose names are one tag (a name of one is the name or an alias of another) are
+   * taken as one, the first keeping a name that two give as an alias. Each stands for:
+   * - the tag of the library that has its name, as its name or as an alias;
+   * - else the one tag that those of its aliases that the library has are names of: the tag is
+   *   known here under another name (`knownAs`), and gets the name of the definition as an alias;
+   * - else a tag to make, with its name.
+   *
+   * That tag gets the aliases that no tag has, up to `MAX_TAG_ALIASES`, and the parent tags it
+   * lacks, up to `MAX_TAG_PARENTS`. A parent tag that neither a definition nor the library names is
+   * made, unless its links are all left out. Every tag a definition stands for, and every tag put
+   * above another, is kept from then on (`kept = 1`).
+   *
+   * Left out, and said why (`skipped`): an alias that another tag has, an alias or a parent tag
+   * past the limits, and every new link that would close a loop. Loops are found all at once: the
+   * new links within a group of tags that a loop joins once they are added are all left out. That
+   * takes one pass over the links however many there are, where checking each against those added
+   * before it took 30 s for 8,000 links listed leaf first.
+   */
+  applyDefinitions(definitions: readonly TagDefinition[], dryRun: boolean): AppliedDefinitions {
+    return this.transaction((): AppliedDefinitions => {
+      const plan = planDefinitions(definitions, {
+        find: (name) => this.find(name),
+        aliasCount: (id) => this.aliasCount(id),
+        parentCount: (id) => this.parentCount(id),
+        hasParent: (id, parentId) => this.statements.hasParent.get(id, parentId) !== undefined,
+        links: () => this.statements.links.all(),
+      });
+      const made = new Map<TagToMake, number>();
+      if (!dryRun) {
+        for (const tag of plan.make) {
+          made.set(tag, this.insertTag(tag.name, 1).id);
+        }
+      }
+      // In a dry run, a tag to make has no id.
+      const idOf = (tag: DefinedTag): number | null => tag.id ?? made.get(tag) ?? null;
+      if (!dryRun) {
+        for (const { tag, alias } of plan.aliases) {
+          this.insertName(idOf(tag) as number, alias, 1);
+        }
+        for (const { tag, parent } of plan.links) {
+          this.statements.link.run(idOf(tag) as number, idOf(parent) as number);
+        }
+        for (const tag of plan.keep) {
+          this.statements.keep.run(tag.id);
+        }
+      }
+      return {
+        named: new Map(
+          [...plan.named].map(([key, tag]) => [key, idOf(tag) ?? (tag as TagToMake).key]),
+        ),
+        created: plan.make.map((tag) => tag.name),
+        aliases: plan.aliases.map(({ tag, alias }) => ({ tag: tag.name, alias })),
+        links: plan.links.map(({ tag, parent }) => ({
+          tag: tag.name,
+          parent: parent.name,
+          tagId: idOf(tag),
+          parentId: idOf(parent),
+        })),
+        knownAs: plan.knownAs,
+        skipped: plan.skipped,
+      };
+    });
+  }
+
+  /**
+   * Files of tag `tagId` and of the tags below it that a search for tag `parentId` does not find
+   * (all of them when `parentId` is `null`): those it starts to find once `tagId` is put below it.
+   * Missing files are left out, as searches leave them out.
+   */
+  newlyFound(tagId: number, parentId: number | null): number {
+    return this.statements.newlyFound.get({ child: tagId, parent: parentId ?? 0 })?.count ?? 0;
+  }
+
   private transaction<T>(fn: () => T): T {
     return this.db.transaction(fn)();
   }
@@ -788,6 +1020,319 @@ export class TagsRepository {
 /** A tag as it is answered: without what it is sorted by here, or how it was found. */
 function toRef({ id, name }: TagRef): TagRef {
   return { id, name };
+}
+
+/**
+ * `definitions` with their names normalised, those that name one tag gathered into one group, in
+ * the order of their first definition. A name that cannot be one is passed over. Of two groups
+ * that give one alias, the first keeps it (`skipped` says so of the other); an alias that is a
+ * name of its own group is passed over, and so is a parent named twice.
+ */
+function groupDefinitions(
+  definitions: readonly TagDefinition[],
+  skipped: TagImportSkip[],
+): { groups: DefinitionGroup[]; owners: Map<string, DefinitionGroup> } {
+  const groups: DefinitionGroup[] = [];
+  /** The group that each name stands for, by `tagKey`. */
+  const owners = new Map<string, DefinitionGroup>();
+  for (const definition of definitions) {
+    const check = normalizeTagName(definition.name);
+    if (!check.ok) {
+      continue;
+    }
+    const key = tagKey(check.name);
+    let group = owners.get(key);
+    if (!group) {
+      group = { name: check.name, key, aliases: [], parents: [], parentKeys: new Set() };
+      groups.push(group);
+      owners.set(key, group);
+    }
+    for (const input of definition.aliases) {
+      const alias = normalizeTagName(input);
+      if (!alias.ok) {
+        continue;
+      }
+      const aliasKey = tagKey(alias.name);
+      const owner = owners.get(aliasKey);
+      if (!owner) {
+        owners.set(aliasKey, group);
+        group.aliases.push(alias.name);
+      } else if (owner !== group) {
+        skipped.push({ kind: 'aliasTaken', tag: group.name, alias: alias.name, owner: owner.name });
+      }
+    }
+    for (const input of definition.parents) {
+      const parent = normalizeTagName(input);
+      if (!parent.ok) {
+        continue;
+      }
+      const parentKey = tagKey(parent.name);
+      if (!group.parentKeys.has(parentKey)) {
+        group.parentKeys.add(parentKey);
+        group.parents.push(parent.name);
+      }
+    }
+  }
+  return { groups, owners };
+}
+
+/** Works out what `applyDefinitions` adds, reading `library` and writing nothing. */
+function planDefinitions(
+  definitions: readonly TagDefinition[],
+  library: LibraryView,
+): DefinitionPlan {
+  const skipped: TagImportSkip[] = [];
+  const knownAs: TagImportKnownAs[] = [];
+  const { groups, owners } = groupDefinitions(definitions, skipped);
+
+  // One object for each tag, so that tags compare as objects: the library's by id, those to make
+  // by key, in the order they come up.
+  const libraryTags = new Map<number, LibraryTag>();
+  const libraryTag = ({ id, name }: TagRef): LibraryTag => {
+    let tag = libraryTags.get(id);
+    if (!tag) {
+      tag = { id, name };
+      libraryTags.set(id, tag);
+    }
+    return tag;
+  };
+  const toMake = new Map<string, TagToMake>();
+  const tagToMake = (key: string, name: string): TagToMake => {
+    let tag = toMake.get(key);
+    if (!tag) {
+      tag = { id: null, key, name };
+      toMake.set(key, tag);
+    }
+    return tag;
+  };
+
+  // What each group stands for.
+  const groupTags = new Map<DefinitionGroup, DefinedTag>();
+  for (const group of groups) {
+    const own = library.find(group.name);
+    if (own) {
+      groupTags.set(group, libraryTag(own));
+      if (own.viaAlias) {
+        knownAs.push({ exported: group.name, tag: own.name });
+      }
+      continue;
+    }
+    const byAlias = new Map<number, ResolvedTag>();
+    for (const alias of group.aliases) {
+      const found = library.find(alias);
+      if (found) {
+        byAlias.set(found.id, found);
+      }
+    }
+    const [only] = byAlias.values();
+    if (byAlias.size === 1 && only) {
+      groupTags.set(group, libraryTag(only));
+      knownAs.push({ exported: group.name, tag: only.name });
+    } else {
+      groupTags.set(group, tagToMake(group.key, group.name));
+    }
+  }
+  const tagOf = (group: DefinitionGroup): DefinedTag => groupTags.get(group) as DefinedTag;
+
+  // Aliases: the names of each group that no tag has.
+  const aliases: { tag: DefinedTag; alias: string }[] = [];
+  const aliasesOf = new Map<DefinedTag, { readonly keys: Set<string>; readonly had: number }>();
+  for (const group of groups) {
+    const tag = tagOf(group);
+    let given = aliasesOf.get(tag);
+    if (!given) {
+      given = { keys: new Set(), had: tag.id === null ? 0 : library.aliasCount(tag.id) };
+      aliasesOf.set(tag, given);
+    }
+    // The name of a group stands for a tag of the library only through its aliases: it is free.
+    const names = tag.id !== null && library.find(group.name) === null ? [group.name] : [];
+    for (const alias of group.aliases) {
+      const owner = library.find(alias);
+      if (owner === null) {
+        names.push(alias);
+      } else if (owner.id !== tag.id) {
+        skipped.push({ kind: 'aliasTaken', tag: tag.name, alias, owner: owner.name });
+      }
+    }
+    for (const name of names) {
+      const key = tagKey(name);
+      if (given.keys.has(key)) {
+        continue;
+      }
+      if (given.had + given.keys.size >= MAX_TAG_ALIASES) {
+        skipped.push({ kind: 'aliasLimit', tag: tag.name, alias: name });
+        continue;
+      }
+      given.keys.add(key);
+      aliases.push({ tag, alias: name });
+    }
+  }
+
+  // Parent links the tags lack, each once.
+  const nodes = new Map<DefinedTag, number>();
+  // A tag of the library is the node of its id, a tag to make one below zero.
+  const nodeOf = (tag: DefinedTag): number => {
+    let node = nodes.get(tag);
+    if (node === undefined) {
+      node = tag.id ?? -(nodes.size + 1);
+      nodes.set(tag, node);
+    }
+    return node;
+  };
+  // A parent tag: the one a group stands for, else the one of the library, else one to make.
+  const parentTag = (name: string, key: string): DefinedTag => {
+    const owner = owners.get(key);
+    if (owner) {
+      return tagOf(owner);
+    }
+    const found = library.find(name);
+    return found ? libraryTag(found) : tagToMake(key, name);
+  };
+  const candidates: { tag: DefinedTag; parent: DefinedTag }[] = [];
+  const considered = new Set<string>();
+  for (const group of groups) {
+    const tag = tagOf(group);
+    for (const name of group.parents) {
+      const key = tagKey(name);
+      const parent = parentTag(name, key);
+      if (parent === tag) {
+        skipped.push({ kind: 'loop', tag: tag.name, parent: parent.name });
+        continue;
+      }
+      if (tag.id !== null && parent.id !== null && library.hasParent(tag.id, parent.id)) {
+        continue;
+      }
+      const pair = `${nodeOf(tag)}>${nodeOf(parent)}`;
+      if (!considered.has(pair)) {
+        considered.add(pair);
+        candidates.push({ tag, parent });
+      }
+    }
+  }
+
+  // The library's links never make a loop: a loop takes at least one new link, and every link of
+  // a loop joins two tags of one strongly connected group.
+  const graph = new Map<number, number[]>();
+  const edge = (from: number, to: number): void => {
+    const targets = graph.get(from);
+    if (targets) {
+      targets.push(to);
+    } else {
+      graph.set(from, [to]);
+    }
+  };
+  if (candidates.length > 0) {
+    for (const { tagId, parentId } of library.links()) {
+      edge(tagId, parentId);
+    }
+  }
+  for (const { tag, parent } of candidates) {
+    edge(nodeOf(tag), nodeOf(parent));
+  }
+  const group = stronglyConnected(
+    graph,
+    candidates.map(({ tag }) => nodeOf(tag)),
+  );
+  const links: { tag: DefinedTag; parent: DefinedTag }[] = [];
+  const parentCounts = new Map<DefinedTag, number>();
+  for (const { tag, parent } of candidates) {
+    if (group.get(nodeOf(tag)) === group.get(nodeOf(parent))) {
+      skipped.push({ kind: 'loop', tag: tag.name, parent: parent.name });
+      continue;
+    }
+    const count = parentCounts.get(tag) ?? (tag.id === null ? 0 : library.parentCount(tag.id));
+    if (count >= MAX_TAG_PARENTS) {
+      skipped.push({ kind: 'parentLimit', tag: tag.name, parent: parent.name });
+      continue;
+    }
+    parentCounts.set(tag, count + 1);
+    links.push({ tag, parent });
+  }
+
+  // Made: the tags of groups, and the parents of the links kept.
+  const used = new Set<DefinedTag>(groupTags.values());
+  for (const { parent } of links) {
+    used.add(parent);
+  }
+  const named = new Map<string, DefinedTag>();
+  for (const [key, owner] of owners) {
+    named.set(key, tagOf(owner));
+  }
+  for (const tag of toMake.values()) {
+    if (used.has(tag) && !named.has(tag.key)) {
+      named.set(tag.key, tag);
+    }
+  }
+  return {
+    named,
+    make: [...toMake.values()].filter((tag) => used.has(tag)),
+    aliases,
+    links,
+    keep: [...used].filter((tag): tag is LibraryTag => tag.id !== null),
+    knownAs,
+    skipped,
+  };
+}
+
+/**
+ * The strongly connected group of each node reachable from `roots` along `graph`, by number:
+ * Tarjan's algorithm, without recursion, so that a chain of any length takes no stack.
+ */
+function stronglyConnected(
+  graph: ReadonlyMap<number, readonly number[]>,
+  roots: readonly number[],
+): Map<number, number> {
+  const order = new Map<number, number>();
+  const low = new Map<number, number>();
+  const group = new Map<number, number>();
+  const stack: number[] = [];
+  const onStack = new Set<number>();
+  let groups = 0;
+  const visit = (node: number): void => {
+    order.set(node, order.size);
+    low.set(node, order.size - 1);
+    stack.push(node);
+    onStack.add(node);
+  };
+  for (const root of roots) {
+    if (order.has(root)) {
+      continue;
+    }
+    visit(root);
+    const path: { readonly node: number; next: number }[] = [{ node: root, next: 0 }];
+    while (path.length > 0) {
+      const frame = path[path.length - 1] as { readonly node: number; next: number };
+      const targets = graph.get(frame.node) ?? [];
+      if (frame.next < targets.length) {
+        const target = targets[frame.next++] as number;
+        if (!order.has(target)) {
+          visit(target);
+          path.push({ node: target, next: 0 });
+        } else if (onStack.has(target)) {
+          low.set(frame.node, Math.min(low.get(frame.node) as number, order.get(target) as number));
+        }
+        continue;
+      }
+      path.pop();
+      const caller = path.at(-1);
+      if (caller) {
+        low.set(
+          caller.node,
+          Math.min(low.get(caller.node) as number, low.get(frame.node) as number),
+        );
+      }
+      if (low.get(frame.node) === order.get(frame.node)) {
+        let member: number;
+        do {
+          member = stack.pop() as number;
+          onStack.delete(member);
+          group.set(member, groups);
+        } while (member !== frame.node);
+        groups++;
+      }
+    }
+  }
+  return group;
 }
 
 /** The answer to a change that was not made. */

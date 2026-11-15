@@ -6,6 +6,7 @@ import type {
   Tag,
   TagExportRecord,
   TagExportResult,
+  TagImportDefinitions,
   TagImportFolder,
   TagImportPreview,
   TagImportResult,
@@ -39,6 +40,20 @@ const source: TagImportSource = {
   problems: [],
 };
 
+/** A tags export that describes no tag, or one whose tags are all here as it describes them. */
+const noDefinitions: TagImportDefinitions = {
+  created: 0,
+  aliases: 0,
+  links: 0,
+  skipped: 0,
+  createdItems: [],
+  aliasItems: [],
+  linkItems: [],
+  knownAs: 0,
+  knownAsItems: [],
+  skippedItems: [],
+};
+
 const preview: TagImportPreview = {
   planId: 1,
   found: { samePlace: 4_980, moved: 110, shared: 3 },
@@ -69,6 +84,7 @@ const preview: TagImportPreview = {
   missedItems: [{ exported: '/Volumes/Archive/d.jpg', reason: 'folder' }],
   additions: { assignments: 3_401, files: 2_971, newTags: 9 },
   additionsWithChanged: { assignments: 3_410, files: 2_980, newTags: 9 },
+  definitions: noDefinitions,
 };
 
 /** Everything found at its place, as when restoring on the same computer. */
@@ -83,12 +99,52 @@ const restore: TagImportPreview = {
   missedItems: [],
 };
 
+/** What a tags export of a library with aliases and parent tags adds here. */
+const definitions: TagImportDefinitions = {
+  created: 4,
+  aliases: 2,
+  links: 5,
+  skipped: 5,
+  createdItems: ['France', 'Europe', 'To sort'],
+  aliasItems: [
+    { tag: 'Paris', alias: 'Paname' },
+    { tag: 'France', alias: 'Hexagone' },
+  ],
+  linkItems: [
+    { tag: 'Paris', parent: 'France', newlyFound: 1_200 },
+    { tag: 'Lyon', parent: 'France', newlyFound: 1 },
+    // France is made by the import, or the files of Rome are found under Europe already.
+    { tag: 'France', parent: 'Europe', newlyFound: null },
+    { tag: 'Rome', parent: 'Europe', newlyFound: 0 },
+  ],
+  knownAs: 1,
+  knownAsItems: [{ exported: 'Paris', tag: 'Lutetia' }],
+  skippedItems: [
+    { kind: 'aliasTaken', tag: 'Lyon', alias: 'Gones', owner: 'Rhone' },
+    { kind: 'aliasLimit', tag: 'Rome', alias: 'Urbs' },
+    { kind: 'loop', tag: 'Europe', parent: 'Paris' },
+    { kind: 'parentLimit', tag: 'Nice', parent: 'Provence' },
+  ],
+};
+
+/** A tags export that lists no file, only tags. */
+const tagsOnly: TagImportSource = { ...source, files: 0, tags: 6 };
+const tagsOnlyPreview: TagImportPreview = {
+  ...restore,
+  found: { samePlace: 0, moved: 0, shared: 0 },
+  folders: [],
+  additions: { assignments: 0, files: 0, newTags: 0 },
+  additionsWithChanged: { assignments: 0, files: 0, newTags: 0 },
+  definitions: { ...noDefinitions, created: 1, links: 1 },
+};
+
 const result: TagImportResult = {
   assignments: 3_410,
   files: 2_980,
   newTags: 9,
   skipped: 3,
   notFound: 112,
+  definitions: { created: 0, aliases: 0, links: 0, skipped: 0 },
 };
 
 const status = (tagTransfer: TagTransferProgress | null): IndexStatus => ({
@@ -135,9 +191,12 @@ describe('TagTransfer', () => {
     target?.dispatchEvent(event);
     return event;
   };
-  /** Opens a tags export whose preview is `shown`. */
-  const openPreview = async (shown: TagImportPreview = preview): Promise<void> => {
-    openTagImport = () => Promise.resolve(source);
+  /** Opens a tags export, `opened`, whose preview is `shown`. */
+  const openPreview = async (
+    shown: TagImportPreview = preview,
+    opened: TagImportSource = source,
+  ): Promise<void> => {
+    openTagImport = () => Promise.resolve(opened);
     worker.respond('planTagImport', () => shown);
     button('Import tags…')?.focus();
     button('Import tags…')?.click();
@@ -190,12 +249,14 @@ describe('TagTransfer', () => {
     expect(host.querySelector('.counts span')?.getAttribute('title')).toBe(lastExport.path);
   });
 
-  it('keeps Export tags… focusable but inert when nothing is tagged, and says why', async () => {
+  it('keeps Export tags… focusable but inert when there is no tag, and says why', async () => {
     let exports = 0;
     exportTags = () => {
       exports++;
       return Promise.resolve(null);
     };
+    worker.respond('listTags', () => []);
+    worker.emit('tagsChanged', null);
     fixture.componentRef.setInput('taggedFiles', 0);
     await render();
 
@@ -203,12 +264,73 @@ describe('TagTransfer', () => {
     expect(exportButton?.disabled).toBe(false);
     expect(exportButton?.getAttribute('aria-disabled')).toBe('true');
     const hint = document.getElementById(exportButton?.getAttribute('aria-describedby') ?? '');
-    expect(text(hint)).toBe('Nothing to export yet: no file is tagged.');
+    expect(text(hint)).toBe('Nothing to export yet: there is no tag.');
     exportButton?.focus();
     exportButton?.click();
     await render();
     expect(exports).toBe(0);
     expect(document.activeElement).toBe(exportButton);
+  });
+
+  it('exports the tags when no file is tagged: a tag made on purpose is kept without one', async () => {
+    let exports = 0;
+    exportTags = () => {
+      exports++;
+      return Promise.resolve({
+        path: EXPORT_PATH,
+        files: 0,
+        missing: 0,
+        tags: 2,
+        definitions: 2,
+        leftOut: 0,
+      });
+    };
+    fixture.componentRef.setInput('taggedFiles', 0);
+    await render();
+
+    const exportButton = button('Export tags…');
+    expect(exportButton?.hasAttribute('aria-disabled')).toBe(false);
+    expect(exportButton?.hasAttribute('aria-describedby')).toBe(false);
+    expect(host.querySelector('.hint')).toBeNull();
+    exportButton?.click();
+    await render();
+    expect(exports).toBe(1);
+    expect(text(host.querySelector('[role="status"]'))).toBe(
+      `Exported 2 tags with their aliases and parent tags to ${EXPORT_PATH}. Keep it with your backups.`,
+    );
+
+    exportTags = () =>
+      Promise.resolve({
+        path: EXPORT_PATH,
+        files: 0,
+        missing: 0,
+        tags: 1,
+        definitions: 1,
+        leftOut: 0,
+      });
+    exportButton?.click();
+    await render();
+    expect(text(host.querySelector('[role="status"]'))).toBe(
+      `Exported 1 tag with its aliases and parent tags to ${EXPORT_PATH}. Keep it with your backups.`,
+    );
+  });
+
+  it('says nothing of a tag to export until the tags are listed', async () => {
+    const listing = Promise.withResolvers<Tag[]>();
+    worker.respond('listTags', () => listing.promise);
+    // The indexer restarted: the tags are listed again.
+    worker.reconnect();
+    fixture.componentRef.setInput('taggedFiles', 0);
+    // Not `whenStable`: it waits for the tags to be listed.
+    await settle();
+    fixture.detectChanges();
+    expect(button('Export tags…')?.hasAttribute('aria-disabled')).toBe(false);
+    expect(host.querySelector('.hint')).toBeNull();
+
+    listing.resolve([]);
+    await render();
+    expect(button('Export tags…')?.getAttribute('aria-disabled')).toBe('true');
+    expect(text(host.querySelector('.hint'))).toBe('Nothing to export yet: there is no tag.');
   });
 
   it('keeps the focus on the busy buttons and shows the progress of an export', async () => {
@@ -229,7 +351,14 @@ describe('TagTransfer', () => {
     );
 
     await progress(null);
-    saving.resolve({ path: EXPORT_PATH, files: 12_345, missing: 0, tags: 87, leftOut: 0 });
+    saving.resolve({
+      path: EXPORT_PATH,
+      files: 12_345,
+      missing: 0,
+      tags: 87,
+      definitions: 0,
+      leftOut: 0,
+    });
     await render();
     expect(exportButton?.hasAttribute('aria-disabled')).toBe(false);
     expect(document.activeElement).toBe(exportButton);
@@ -252,7 +381,8 @@ describe('TagTransfer', () => {
 
   it('says where the tags were exported, and how many files were missing', async () => {
     const path = EXPORT_PATH;
-    exportTags = () => Promise.resolve({ path, files: 12_345, missing: 0, tags: 87, leftOut: 0 });
+    exportTags = () =>
+      Promise.resolve({ path, files: 12_345, missing: 0, tags: 87, definitions: 0, leftOut: 0 });
     button('Export tags…')?.click();
     await render();
     expect(text(host.querySelector('[role="status"]'))).toBe(
@@ -260,14 +390,16 @@ describe('TagTransfer', () => {
     );
     expect(worker.callsTo('getLastTagExport')).toHaveLength(2);
 
-    exportTags = () => Promise.resolve({ path, files: 12_345, missing: 12, tags: 87, leftOut: 0 });
+    exportTags = () =>
+      Promise.resolve({ path, files: 12_345, missing: 12, tags: 87, definitions: 0, leftOut: 0 });
     button('Export tags…')?.click();
     await render();
     expect(text(host.querySelector('[role="status"]'))).toBe(
       `Exported the tags of 12,345 files (12 of them missing from disk) to ${path}. Keep it with your backups.`,
     );
 
-    exportTags = () => Promise.resolve({ path, files: 1, missing: 1, tags: 1, leftOut: 0 });
+    exportTags = () =>
+      Promise.resolve({ path, files: 1, missing: 1, tags: 1, definitions: 0, leftOut: 0 });
     button('Export tags…')?.click();
     await render();
     expect(text(host.querySelector('[role="status"]'))).toBe(
@@ -275,18 +407,39 @@ describe('TagTransfer', () => {
     );
   });
 
+  it('says how many tags were exported with their aliases and parent tags', async () => {
+    const path = EXPORT_PATH;
+    exportTags = () =>
+      Promise.resolve({ path, files: 12_345, missing: 12, tags: 87, definitions: 40, leftOut: 0 });
+    button('Export tags…')?.click();
+    await render();
+    expect(text(host.querySelector('[role="status"]'))).toBe(
+      `Exported the tags of 12,345 files (12 of them missing from disk) and the aliases and parent tags of 40 tags to ${path}. Keep it with your backups.`,
+    );
+
+    exportTags = () =>
+      Promise.resolve({ path, files: 1, missing: 0, tags: 2, definitions: 1, leftOut: 0 });
+    button('Export tags…')?.click();
+    await render();
+    expect(text(host.querySelector('[role="status"]'))).toBe(
+      `Exported the tags of 1 file and the aliases and parent tags of 1 tag to ${path}. Keep it with your backups.`,
+    );
+  });
+
   it('says how many tags the tags export could not hold, and why', async () => {
     const path = EXPORT_PATH;
     const limits = 'a tags export cannot hold more than 1,000 tags on one file.';
     // Distinct tags: one on 1,203 files is left out once.
-    exportTags = () => Promise.resolve({ path, files: 12_345, missing: 12, tags: 87, leftOut: 3 });
+    exportTags = () =>
+      Promise.resolve({ path, files: 12_345, missing: 12, tags: 87, definitions: 0, leftOut: 3 });
     button('Export tags…')?.click();
     await render();
     expect(text(host.querySelector('[role="status"]'))).toBe(
       `Exported the tags of 12,345 files (12 of them missing from disk) to ${path}. Keep it with your backups. 3 tags could not be exported for some or all of their files: ${limits}`,
     );
 
-    exportTags = () => Promise.resolve({ path, files: 1, missing: 0, tags: 2, leftOut: 1 });
+    exportTags = () =>
+      Promise.resolve({ path, files: 1, missing: 0, tags: 2, definitions: 0, leftOut: 1 });
     button('Export tags…')?.click();
     await render();
     expect(text(host.querySelector('[role="status"]'))).toBe(
@@ -307,7 +460,14 @@ describe('TagTransfer', () => {
     expect(button('Import tags…')?.getAttribute('aria-disabled')).toBe('true');
 
     lastExport = { at: new Date(2026, 9, 19, 9).getTime(), path: EXPORT_PATH, files: 12_345 };
-    saving.resolve({ path: EXPORT_PATH, files: 12_345, missing: 0, tags: 87, leftOut: 0 });
+    saving.resolve({
+      path: EXPORT_PATH,
+      files: 12_345,
+      missing: 0,
+      tags: 87,
+      definitions: 0,
+      leftOut: 0,
+    });
     await render();
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(text(host.querySelector('[role="status"]'))).toBe(
@@ -527,6 +687,198 @@ describe('TagTransfer', () => {
     expect(worker.callsTo('closeTagImport').length).toBeGreaterThan(0);
   });
 
+  it('previews the tags, aliases and parent tags importing adds, and what it leaves out', async () => {
+    await openPreview({ ...preview, definitions });
+    const shown = host.querySelector('app-tag-import-preview');
+    const section = [...(shown?.querySelectorAll('h4') ?? [])].find(
+      (heading) => text(heading) === 'Aliases and parent tags',
+    );
+    // Each count without the items that its Show lists.
+    const counts = [...(section?.nextElementSibling?.children ?? [])].map((line) =>
+      (line.firstChild?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    );
+    expect(counts).toEqual([
+      '4 tags created',
+      '2 aliases added',
+      '5 parent tags added',
+      '1 tag known here under another name',
+      '5 left out',
+    ]);
+    const items = (label: string): string[] =>
+      [...(shown?.querySelector(`[aria-label="${label}"]`)?.children ?? [])].map((item) =>
+        text(item),
+      );
+    expect(items('Tags created')).toEqual(['France', 'Europe', 'To sort', '… and 1 more']);
+    expect(items('Aliases added')).toEqual(['Paname → Paris', 'Hexagone → France']);
+    expect(items('Parent tags added')).toEqual([
+      'Paris under France · a search for France finds 1,200 more files',
+      'Lyon under France · a search for France finds 1 more file',
+      'France under Europe',
+      'Rome under Europe',
+      '… and 1 more',
+    ]);
+    expect(items('Tags known here under another name')).toEqual([
+      'Paris is known here as Lutetia: Paris becomes one of its aliases',
+    ]);
+    expect(items('Aliases and parent tags left out')).toEqual([
+      'Gones as an alias of Lyon · already a name of Rhone',
+      'Urbs as an alias of Rome · Rome would have more than 100 aliases',
+      'Paris as a parent tag of Europe · would make a loop',
+      'Provence as a parent tag of Nice · Nice would have more than 100 parent tags',
+      '… and 1 more',
+    ]);
+    // The tags described are made whether or not a file gets them, the others with their files.
+    expect(text(shown?.querySelector('.summary'))).toBe(
+      'Importing adds 3,410 tags to 2,980 files, creates 13 new tags, and adds 2 aliases and 5 parent tags.',
+    );
+
+    // Only what is there is said.
+    await openPreview({
+      ...preview,
+      definitions: { ...noDefinitions, aliases: 1, aliasItems: [definitions.aliasItems[0]!] },
+    });
+    const only = host.querySelector('app-tag-import-preview');
+    expect(text(only)).toContain('1 alias added');
+    for (const absent of ['created', 'parent tags added', 'known here', 'left out']) {
+      expect(text(only)).not.toContain(absent);
+    }
+    expect(text(only?.querySelector('.summary'))).toBe(
+      'Importing adds 3,410 tags to 2,980 files, creates 9 new tags, and adds 1 alias.',
+    );
+    await openPreview(preview);
+    expect(text(host.querySelector('app-tag-import-preview'))).not.toContain(
+      'Aliases and parent tags',
+    );
+  });
+
+  it('imports a tags export that lists no file, only tags', async () => {
+    worker.respond('applyTagImport', () => ({
+      ...result,
+      assignments: 0,
+      files: 0,
+      newTags: 0,
+      skipped: 0,
+      notFound: 0,
+      definitions: { created: 1, aliases: 0, links: 1, skipped: 0 },
+    }));
+    const planned = Promise.withResolvers<TagImportPreview>();
+    openTagImport = () => Promise.resolve(tagsOnly);
+    worker.respond('planTagImport', () => planned.promise);
+    button('Import tags…')?.focus();
+    button('Import tags…')?.click();
+    await render();
+    expect(text(host.querySelector('[role="status"]'))).toBe(
+      'Checking the tags of the tags export…',
+    );
+
+    planned.resolve(tagsOnlyPreview);
+    await render();
+    const shown = host.querySelector('app-tag-import-preview');
+    expect(text(shown?.querySelector('.about'))).toBe(
+      'Exported on October 12, 2026 from a Mac · 6 tags',
+    );
+    expect(text(shown)).toContain(
+      'This tags export lists no file, only tags with their aliases and parent tags. No tag is removed or renamed.',
+    );
+    for (const absent of [
+      'Tags are added to files',
+      'found',
+      'Library folders in the tags export',
+    ]) {
+      expect(text(shown)).not.toContain(absent);
+    }
+    // Only the counts of the tags it describes: no list of files, not even an empty one.
+    expect(shown?.querySelectorAll('.counts')).toHaveLength(1);
+    expect(shown?.querySelector('h4 + .counts')).not.toBeNull();
+    expect(text(shown?.querySelector('.summary'))).toBe(
+      'Importing creates 1 new tag, and adds 1 parent tag.',
+    );
+    expect(labels()).toEqual([
+      'Export tags…',
+      'Import tags…',
+      'Check again',
+      'Cancel',
+      'Import tags',
+    ]);
+    expect(document.activeElement).toBe(button('Import tags'));
+
+    button('Import tags')?.click();
+    await render();
+    expect(worker.callsTo('applyTagImport')).toEqual([['token-1', 1, true]]);
+    expect(text(host.querySelector('[role="status"]'))).toBe(
+      'Created 1 new tag, and added 1 parent tag.',
+    );
+  });
+
+  it('imports aliases and parent tags although no file gets a tag', async () => {
+    const aliasesOnly: TagImportPreview = {
+      ...restore,
+      additions: { assignments: 0, files: 0, newTags: 0 },
+      additionsWithChanged: { assignments: 0, files: 0, newTags: 0 },
+      definitions: { ...noDefinitions, aliases: 2, links: 1 },
+    };
+    worker.respond('applyTagImport', () => ({
+      ...result,
+      assignments: 0,
+      files: 0,
+      newTags: 0,
+      skipped: 0,
+      notFound: 0,
+      definitions: { created: 0, aliases: 2, links: 1, skipped: 0 },
+    }));
+    await openPreview(aliasesOnly);
+    expect(text(host.querySelector('.summary'))).toBe(
+      'The files found already have all these tags. Importing adds 2 aliases and 1 parent tag.',
+    );
+    expect(button('Import tags')).toBeDefined();
+
+    // None of its files is here, but its tags are worth importing still.
+    await openPreview({
+      ...aliasesOnly,
+      found: { samePlace: 0, moved: 0, shared: 0 },
+      notFound: { missing: 0, uncompared: 0, folder: 5_214, notFound: 0 },
+      definitions: { ...noDefinitions, aliases: 1 },
+    });
+    expect(text(host.querySelector('.summary'))).toBe(
+      'None of these files were found in your library folders. Add the folders that hold them, here or in Library folders, then check again. Importing now only adds 1 alias.',
+    );
+    expect(labels()).toEqual([
+      'Export tags…',
+      'Import tags…',
+      'Check again',
+      'Cancel',
+      'Import tags',
+    ]);
+
+    await openPreview(aliasesOnly);
+    button('Import tags')?.click();
+    await render();
+    expect(text(host.querySelector('[role="status"]'))).toBe(
+      'Added 2 aliases and 1 parent tag. No file got a new tag.',
+    );
+  });
+
+  it('offers only Close when the tags a tags export describes are all here', async () => {
+    await openPreview({ ...tagsOnlyPreview, definitions: noDefinitions }, tagsOnly);
+    expect(text(host.querySelector('.summary'))).toBe(
+      'Nothing to add: these tags are already here, with their aliases and parent tags.',
+    );
+    expect(labels()).toEqual(['Export tags…', 'Import tags…', 'Check again', 'Close']);
+    expect(host.querySelector('app-tag-import-preview h4')).toBeNull();
+
+    await openPreview(
+      {
+        ...tagsOnlyPreview,
+        definitions: { ...noDefinitions, skipped: 1, skippedItems: [definitions.skippedItems[2]!] },
+      },
+      tagsOnly,
+    );
+    expect(text(host.querySelector('.summary'))).toBe(
+      'Nothing to add: the aliases and parent tags not here yet are left out.',
+    );
+    expect(labels()).toEqual(['Export tags…', 'Import tags…', 'Check again', 'Close']);
+  });
+
   it('adds a library folder, starting nothing else meanwhile, then checks again', async () => {
     const adding = Promise.withResolvers<undefined>();
     worker.respond('addRoot', async (path) => {
@@ -618,7 +970,14 @@ describe('TagTransfer', () => {
   });
 
   it('says nothing was added, and why, when every file was left out', async () => {
-    const none = { assignments: 0, files: 0, newTags: 0, skipped: 0, notFound: 0 };
+    const none: TagImportResult = {
+      ...result,
+      assignments: 0,
+      files: 0,
+      newTags: 0,
+      skipped: 0,
+      notFound: 0,
+    };
     worker.respond('applyTagImport', () => none);
     await openPreview();
     button('Import tags')?.click();
@@ -634,6 +993,46 @@ describe('TagTransfer', () => {
     expect(text(host.querySelector('[role="status"]'))).toBe(
       'Nothing was added. 3 files changed or left the library during the import and were left out: import the tags export again to include them.',
     );
+  });
+
+  it('says which tags, aliases and parent tags the import added', async () => {
+    const added = async (
+      imported: Partial<TagImportResult>,
+      opened: TagImportSource = source,
+    ): Promise<string> => {
+      worker.respond('applyTagImport', () => ({ ...result, skipped: 0, notFound: 0, ...imported }));
+      await openPreview({ ...preview, definitions }, opened);
+      button('Import tags')?.click();
+      await render();
+      return text(host.querySelector('[role="status"]'));
+    };
+
+    expect(await added({ definitions: { created: 4, aliases: 2, links: 1, skipped: 5 } })).toBe(
+      'Added 3,410 tags to 2,980 files, created 13 new tags, and added 2 aliases and 1 parent tag.',
+    );
+    expect(
+      await added({ newTags: 0, definitions: { created: 0, aliases: 0, links: 3, skipped: 0 } }),
+    ).toBe('Added 3,410 tags to 2,980 files, and added 3 parent tags.');
+    expect(
+      await added({
+        assignments: 0,
+        files: 0,
+        newTags: 0,
+        definitions: { created: 1, aliases: 1, links: 0, skipped: 0 },
+      }),
+    ).toBe('Created 1 new tag, and added 1 alias. No file got a new tag.');
+    // Another window imported the same tags meanwhile.
+    expect(
+      await added(
+        {
+          assignments: 0,
+          files: 0,
+          newTags: 0,
+          definitions: { created: 0, aliases: 0, links: 0, skipped: 0 },
+        },
+        tagsOnly,
+      ),
+    ).toBe('Nothing was added.');
   });
 
   it('offers to check again after a failed import only while the tags export is open', async () => {

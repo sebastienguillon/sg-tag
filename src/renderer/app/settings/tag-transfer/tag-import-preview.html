@@ -1,6 +1,6 @@
 @let file = source();
 @let plan = preview();
-@let toAdd = additions();
+@let defs = plan.definitions;
 
 <h3 [id]="headingId">Import tags from “{{ file.name }}”?</h3>
 <p class="about">
@@ -13,13 +13,23 @@
   } @else if (exportedFrom(); as computer) {
     Exported from {{ computer }} ·
   }
-  {{ file.files | number }} tagged file{{ file.files === 1 ? '' : 's' }} ·
+  @if (file.files > 0) {
+    {{ file.files | number }} tagged file{{ file.files === 1 ? '' : 's' }} ·
+  }
   {{ file.tags | number }} tag{{ file.tags === 1 ? '' : 's' }}
 </p>
-<p>
-  Tags are added to files already in your library folders. No file is copied, moved or changed, and
-  no tag is removed.
-</p>
+@if (file.files > 0) {
+  <p>
+    Tags are added to files already in your library folders. No file is copied, moved or changed,
+    and no tag is removed.
+  </p>
+} @else {
+  <!-- Nothing about files to say: the files paragraphs below have nothing to count. -->
+  <p>
+    This tags export lists no file, only tags with their aliases and parent tags. No tag is removed
+    or renamed.
+  </p>
+}
 @if (file.invalid > 0) {
   <p>
     {{ file.invalid | number }} line{{ file.invalid === 1 ? '' : 's' }} of the tags export could not
@@ -40,41 +50,41 @@
     {{ found() | number }} of {{ file.files | number }} file{{ file.files === 1 ? '' : 's' }}
     found.
   </p>
+  <ul class="counts">
+    @if (plan.found.samePlace > 0) {
+      <li>{{ plan.found.samePlace | number }} at the same place</li>
+    }
+    @if (plan.found.moved > 0) {
+      <li>
+        {{ plan.found.moved | number }} renamed or moved since the export, recognised by
+        {{ plan.found.moved === 1 ? 'its' : 'their' }} content
+        <details>
+          <summary>Show<span class="visually-hidden"> the files renamed or moved</span></summary>
+          <ul class="paths" tabindex="0" aria-label="Files renamed or moved">
+            @for (item of plan.movedItems; track $index) {
+              <li>
+                {{ item.exported }} <span class="current">→ {{ item.current }}</span>
+              </li>
+            }
+            @if (plan.found.moved > plan.movedItems.length) {
+              <li class="more">
+                … and {{ plan.found.moved - plan.movedItems.length | number }} more
+              </li>
+            }
+          </ul>
+        </details>
+      </li>
+    }
+    @if (plan.found.shared > 0) {
+      <li>
+        {{ plan.found.shared | number }} identical
+        {{ plan.found.shared === 1 ? 'copy' : 'copies' }} in the export
+        {{ plan.found.shared === 1 ? 'was' : 'were' }} found as one file here, which gets the tags
+        of each
+      </li>
+    }
+  </ul>
 }
-<ul class="counts">
-  @if (plan.found.samePlace > 0) {
-    <li>{{ plan.found.samePlace | number }} at the same place</li>
-  }
-  @if (plan.found.moved > 0) {
-    <li>
-      {{ plan.found.moved | number }} renamed or moved since the export, recognised by
-      {{ plan.found.moved === 1 ? 'its' : 'their' }} content
-      <details>
-        <summary>Show<span class="visually-hidden"> the files renamed or moved</span></summary>
-        <ul class="paths" tabindex="0" aria-label="Files renamed or moved">
-          @for (item of plan.movedItems; track $index) {
-            <li>
-              {{ item.exported }} <span class="current">→ {{ item.current }}</span>
-            </li>
-          }
-          @if (plan.found.moved > plan.movedItems.length) {
-            <li class="more">
-              … and {{ plan.found.moved - plan.movedItems.length | number }} more
-            </li>
-          }
-        </ul>
-      </details>
-    </li>
-  }
-  @if (plan.found.shared > 0) {
-    <li>
-      {{ plan.found.shared | number }} identical
-      {{ plan.found.shared === 1 ? 'copy' : 'copies' }} in the export
-      {{ plan.found.shared === 1 ? 'was' : 'were' }} found as one file here, which gets the tags of
-      each
-    </li>
-  }
-</ul>
 @if (plan.changed > 0) {
   <div class="changed">
     <label>
@@ -197,19 +207,136 @@
   </ul>
 }
 
+@if (showDefinitions()) {
+  <h4>Aliases and parent tags</h4>
+  <ul class="counts">
+    @if (defs.created > 0) {
+      <li>
+        {{ defs.created | number }} tag{{ defs.created === 1 ? '' : 's' }} created
+        <details>
+          <summary>Show<span class="visually-hidden"> the tags created</span></summary>
+          <ul class="paths names" tabindex="0" aria-label="Tags created">
+            @for (name of defs.createdItems; track $index) {
+              <li>{{ name }}</li>
+            }
+            @if (defs.created > defs.createdItems.length) {
+              <li class="more">
+                … and {{ defs.created - defs.createdItems.length | number }} more
+              </li>
+            }
+          </ul>
+        </details>
+      </li>
+    }
+    @if (defs.aliases > 0) {
+      <li>
+        {{ defs.aliases | number }} alias{{ defs.aliases === 1 ? '' : 'es' }} added
+        <details>
+          <summary>Show<span class="visually-hidden"> the aliases added</span></summary>
+          <ul class="paths names" tabindex="0" aria-label="Aliases added">
+            @for (item of defs.aliasItems; track $index) {
+              <li>{{ item.alias }} → {{ item.tag }}</li>
+            }
+            @if (defs.aliases > defs.aliasItems.length) {
+              <li class="more">… and {{ defs.aliases - defs.aliasItems.length | number }} more</li>
+            }
+          </ul>
+        </details>
+      </li>
+    }
+    @if (defs.links > 0) {
+      <li>
+        {{ defs.links | number }} parent tag{{ defs.links === 1 ? '' : 's' }} added
+        <details>
+          <summary>Show<span class="visually-hidden"> the parent tags added</span></summary>
+          <ul class="paths names" tabindex="0" aria-label="Parent tags added">
+            @for (link of defs.linkItems; track $index) {
+              <li>
+                {{ link.tag }} under {{ link.parent }}
+                <!-- Only when files are newly found: a tag the import makes has none (`null`). -->
+                @if (link.newlyFound; as newlyFound) {
+                  <span class="reason">
+                    · a search for {{ link.parent }} finds {{ newlyFound | number }} more file{{
+                      newlyFound === 1 ? '' : 's'
+                    }}
+                  </span>
+                }
+              </li>
+            }
+            @if (defs.links > defs.linkItems.length) {
+              <li class="more">… and {{ defs.links - defs.linkItems.length | number }} more</li>
+            }
+          </ul>
+        </details>
+      </li>
+    }
+    @if (defs.knownAs > 0) {
+      <li>
+        {{ defs.knownAs | number }} tag{{ defs.knownAs === 1 ? '' : 's' }} known here under another
+        name
+        <details>
+          <summary>
+            Show<span class="visually-hidden"> the tags known here under another name</span>
+          </summary>
+          <ul class="paths names" tabindex="0" aria-label="Tags known here under another name">
+            @for (item of defs.knownAsItems; track $index) {
+              <li>
+                {{ item.exported }} is known here as {{ item.tag }}: {{ item.exported }} becomes one
+                of its aliases
+              </li>
+            }
+            @if (defs.knownAs > defs.knownAsItems.length) {
+              <li class="more">
+                … and {{ defs.knownAs - defs.knownAsItems.length | number }} more
+              </li>
+            }
+          </ul>
+        </details>
+      </li>
+    }
+    @if (defs.skipped > 0) {
+      <li>
+        {{ defs.skipped | number }} left out
+        <details>
+          <summary>
+            Show<span class="visually-hidden"> the aliases and parent tags left out</span>
+          </summary>
+          <ul class="paths names" tabindex="0" aria-label="Aliases and parent tags left out">
+            @for (item of skipped(); track $index) {
+              <li>
+                {{ item.what }} <span class="reason">· {{ item.why }}</span>
+              </li>
+            }
+            @if (defs.skipped > defs.skippedItems.length) {
+              <li class="more">
+                … and {{ defs.skipped - defs.skippedItems.length | number }} more
+              </li>
+            }
+          </ul>
+        </details>
+      </li>
+    }
+  </ul>
+}
+
 <p class="summary" [id]="summaryId">
-  @if (nothingFound()) {
+  @if (file.files > 0 && nothingFound()) {
     None of these files were found in your library folders. Add the folders that hold them, here or
     in Library folders, then check again.
-  } @else if (toAdd.assignments === 0) {
+    @if (canImport()) {
+      Importing now only {{ adds() }}.
+    }
+  } @else if (canImport()) {
+    @if (file.files > 0 && !tagsFiles()) {
+      The files found already have all these tags.
+    }
+    Importing {{ adds() }}.
+  } @else if (file.files > 0) {
     Nothing to add: the files found already have all these tags.
-  } @else if (toAdd.newTags > 0) {
-    Importing adds {{ toAdd.assignments | number }} tag{{ toAdd.assignments === 1 ? '' : 's' }} to
-    {{ toAdd.files | number }} file{{ toAdd.files === 1 ? '' : 's' }}, and creates
-    {{ toAdd.newTags | number }} new tag{{ toAdd.newTags === 1 ? '' : 's' }}.
+  } @else if (defs.skipped > 0) {
+    Nothing to add: the aliases and parent tags not here yet are left out.
   } @else {
-    Importing adds {{ toAdd.assignments | number }} tag{{ toAdd.assignments === 1 ? '' : 's' }} to
-    {{ toAdd.files | number }} file{{ toAdd.files === 1 ? '' : 's' }}.
+    Nothing to add: these tags are already here, with their aliases and parent tags.
   }
 </p>
 

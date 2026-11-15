@@ -41,6 +41,7 @@ const exported: TagExportResult = {
   files: 1_234,
   missing: 0,
   tags: 12,
+  definitions: 0,
   leftOut: 0,
 };
 

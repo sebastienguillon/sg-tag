@@ -104,9 +104,13 @@ byte-identical, which also means:
 
 ### Exporting and importing tags
 
-A tags export lists every tagged file, including missing ones and those on drives that are not
-connected, with its tags. The only tags it leaves out are those past 1,000 on one file: Settings
-says how many. A tags export holds up to 256 MiB, about 670,000 tagged files with long paths and
+A tags export describes every tag you made or edited on purpose, with its aliases and parent tags,
+even when no file has it, and lists every tagged file, including missing ones and those on drives
+that are not connected, with its tags. The only tags it leaves out are those past 1,000 on one file:
+Settings says how many. Importing it adds the tags it describes and the aliases and parent tags they
+lack: a tag known in your library under another name gets the exported name as an alias, and an
+alias that another tag already has, or a parent tag that would put a tag below itself, is left out
+and listed. A tags export holds up to 256 MiB, about 670,000 tagged files with long paths and
 near a million with short ones, and lists every library folder whatever its path, up to 10,000 of
 them (tens at the longest paths a computer takes): Export tags… refuses a larger one rather than
 save a file that Import tags… would refuse. A tags export made by an earlier version of SG Tag
@@ -125,18 +129,21 @@ export of the same name is lost: the default name carries the date to avoid that
 ### Tags export format
 
 UTF-8 [JSON Lines](https://jsonlines.org): a header (`format: "sg-tag/tags"`, `version: 2`, `app`,
-`exportedAt`, `platform`, `fingerprint` scheme, `roots`), one line per tagged file (`root`, `rel`,
-`path`, `size`, `mtimeMs`, `fingerprint`, `sha256`, `missing`, `tags`), then
-`{"end":true,"files":N}`. Fields may be added within a version; readers should ignore fields they do
-not know. For example, `jq -c 'select(.tags) | {path, tags}' "SG Tag tags 2026-10-19.jsonl"` lists
-each file with its tags.
+`exportedAt`, `platform`, `fingerprint` scheme, `roots`), one line per tag made or edited on
+purpose (`tag`, and `aliases` and `parents` when it has any), one line per tagged file (`root`,
+`rel`, `path`, `size`, `mtimeMs`, `fingerprint`, `sha256`, `missing`, `tags`), then
+`{"end":true,"files":N,"tags":M}`. Fields may be added within a version; readers should ignore
+fields they do not know. For example,
+`jq -c 'select(.rel) | {path, tags}' "SG Tag tags 2026-10-19.jsonl"` lists each file with its tags.
 
 ```
 {"format":"sg-tag/tags","version":2,"app":"2026.10.0-alpha.1","exportedAt":"2026-10-19T08:30:00.000Z","platform":"darwin","fingerprint":"sha256(size,head64k,tail64k)/32","roots":[{"path":"/Users/seb/Pictures"},{"path":"/Volumes/Archive"}]}
+{"tag":"Japan 2024","aliases":["Nihon 2024"],"parents":["Trips"]}
+{"tag":"Trips"}
 {"root":0,"rel":"2024/Japan/IMG_1234.JPG","path":"/Users/seb/Pictures/2024/Japan/IMG_1234.JPG","size":4718233,"mtimeMs":1717171717000,"fingerprint":"9f86d081884c7d659a2feaa0c55ad015","sha256":null,"missing":false,"tags":["Ana","Japan 2024"]}
 {"root":0,"rel":"2023/beach.mov","path":"/Users/seb/Pictures/2023/beach.mov","size":81234567,"mtimeMs":1690000000000,"fingerprint":"0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","missing":true,"tags":["family"]}
 {"root":1,"rel":"Scans/1998/scan-0001.tif","path":"/Volumes/Archive/Scans/1998/scan-0001.tif","size":31457280,"mtimeMs":1012345678000,"fingerprint":null,"sha256":null,"missing":false,"tags":["family","grandparents"]}
-{"end":true,"files":3}
+{"end":true,"files":3,"tags":2}
 ```
 
 ## Releasing

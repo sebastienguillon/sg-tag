@@ -20,6 +20,7 @@ import {
   nfcOf,
   readsHeader,
   readTagFile,
+  tagLine,
 } from './tag-file';
 
 const NOT_AN_EXPORT = 'This is not an SG Tag tags export.';
@@ -84,7 +85,7 @@ describe('tags export files', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('writes a header, a line per file and a trailer that read back as the same files', async () => {
+  it('writes a header, tag lines, a line per file and a trailer that read back as the same', async () => {
     const photo: TaggedFileRow = {
       id: 7,
       rootId: 3,
@@ -110,16 +111,21 @@ describe('tags export files', () => {
     };
     const text = [
       headerLine(HEADER),
+      tagLine({ name: 'Japan 2024', aliases: ['Nihon 2024'], parents: ['Trips', 'Japan'] }),
+      tagLine({ name: 'Trips', aliases: [], parents: [] }),
       entryLine(photo, 0, ['Ana', 'Japan 2024']),
       entryLine(scan, 1, ['family', 'AC/DC']),
-      endLine(2),
+      endLine(2, 2),
     ].join('');
 
     expect(text.split('\n')).toEqual([
       '{"format":"sg-tag/tags","version":2,"app":"2026.10.0-alpha.1","exportedAt":"2026-10-19T08:30:00.000Z","platform":"darwin","fingerprint":"sha256(size,head64k,tail64k)/32","roots":[{"path":"/Users/seb/Pictures"},{"path":"/Volumes/Archive"}]}',
+      // Empty lists are left out.
+      '{"tag":"Japan 2024","aliases":["Nihon 2024"],"parents":["Trips","Japan"]}',
+      '{"tag":"Trips"}',
       `{"root":0,"rel":"2024/Japan/IMG_1234.JPG","path":"/Users/seb/Pictures/2024/Japan/IMG_1234.JPG","size":4718233,"mtimeMs":1717171717000,"fingerprint":"${PRINT}","sha256":null,"missing":false,"tags":["Ana","Japan 2024"]}`,
       `{"root":1,"rel":"scan.tif","path":"/Volumes/Archive/scan.tif","size":0,"mtimeMs":1717171717000,"fingerprint":null,"sha256":"${HASH}","missing":true,"tags":["family","AC/DC"]}`,
-      '{"end":true,"files":2}',
+      '{"end":true,"files":2,"tags":2}',
       '',
     ]);
     await writeFile(file, text);
@@ -154,6 +160,12 @@ describe('tags export files', () => {
           tags: ['family', 'AC/DC'],
         },
       ],
+      definitions: [
+        { name: 'Japan 2024', aliases: ['Nihon 2024'], parents: ['Trips', 'Japan'] },
+        { name: 'Trips', aliases: [], parents: [] },
+      ],
+      // Japan 2024 and Trips, which the tag lines describe, and the other tags of the files.
+      tagCount: 5,
       invalid: 0,
       problems: [],
       // AC/DC is one tag.
@@ -313,7 +325,7 @@ describe('tags export files', () => {
     const segment = `${'\u0301'.repeat(383)}${'\u0316'.repeat(382)}`;
     const rel = [...Array.from({ length: 128 }, () => segment), segment.slice(0, 253)].join('/');
     expect(rel).toHaveLength(98_301);
-    await writeFile(file, [first, `${entry({ rel })}\n`, endLine(1)].join(''));
+    await writeFile(file, [first, `${entry({ rel })}\n`, endLine(1, 0)].join(''));
     const normalize = vi.spyOn(String.prototype, 'normalize');
     const parse = vi.spyOn(JSON, 'parse');
 
@@ -377,9 +389,112 @@ describe('tags export files', () => {
     expect((await read()).invalid).toBe(1);
   });
 
-  it('refuses a tags export that lists no file it can read', async () => {
+  it('refuses a tags export that lists no tag it can read', async () => {
     await exportOf(entry({ tags: [] }));
-    await expect(read()).rejects.toThrow('This tags export lists no tagged file that can be read.');
+    await expect(read()).rejects.toThrow('This tags export lists no tag that can be read.');
+  });
+
+  describe('tag lines', () => {
+    /** The end line of a tags export of `files` file lines and `tags` tag lines. */
+    const end = (files: number, tags: number): string => JSON.stringify({ end: true, files, tags });
+
+    it('reads the tags that tag lines describe, before or among the file lines', async () => {
+      await write([
+        header(),
+        JSON.stringify({ tag: 'Paris', aliases: ['Paname'], parents: ['France'] }),
+        entry(),
+        JSON.stringify({ tag: 'France' }),
+        end(1, 2),
+      ]);
+
+      const parsed = await read();
+      expect(parsed.definitions).toEqual([
+        { name: 'Paris', aliases: ['Paname'], parents: ['France'] },
+        { name: 'France', aliases: [], parents: [] },
+      ]);
+      expect(parsed.entries).toEqual([expect.objectContaining({ tags: ['t'] })]);
+      // Paris, France and t.
+      expect(parsed.tagCount).toBe(3);
+      expect(parsed.invalid).toBe(0);
+    });
+
+    it('reads a tags export that only describes tags', async () => {
+      await write([header(), JSON.stringify({ tag: 'Unused' }), end(0, 1)]);
+
+      const parsed = await read();
+      expect(parsed.entries).toEqual([]);
+      expect(parsed.definitions).toEqual([{ name: 'Unused', aliases: [], parents: [] }]);
+      expect(parsed.tagCount).toBe(1);
+    });
+
+    it('counts a name and its aliases as one tag, and the tag of a file they name once', async () => {
+      await write([
+        header(),
+        JSON.stringify({ tag: 'Paris', aliases: ['Paname'] }),
+        JSON.stringify({ tag: 'PARIS', parents: ['France'] }),
+        entry({ tags: ['paname', 'Lyon'] }),
+        end(1, 2),
+      ]);
+
+      // Paris and Lyon: France is only named as a parent.
+      expect((await read()).tagCount).toBe(2);
+    });
+
+    it('checks the names of a tag line as any name, and leaves out those it cannot be', async () => {
+      await write([
+        header(),
+        JSON.stringify({ tag: 'Paris, France' }),
+        JSON.stringify({ tag: 5 }),
+        JSON.stringify({
+          tag: '  New   York ',
+          aliases: ['NYC', 'a,b', 7, '', 'new york', 'nyc', 'Big Apple'],
+          parents: ['USA', ' usa '],
+        }),
+        JSON.stringify({ tag: 'Lyon', parents: 'France' }),
+        entry(),
+        end(1, 4),
+      ]);
+
+      const parsed = await read();
+      expect(parsed.definitions).toEqual([
+        // A blank alias, one named twice and the name itself are dropped without a word.
+        { name: 'New York', aliases: ['NYC', 'Big Apple'], parents: ['USA'] },
+        { name: 'Lyon', aliases: [], parents: [] },
+      ]);
+      expect(parsed.problems).toEqual([
+        'Line 2: invalid tag.',
+        'Line 3: invalid tag.',
+        'Line 4: an alias or a parent tag was left out.',
+        'Line 5: an alias or a parent tag was left out.',
+      ]);
+      expect(parsed.invalid).toBe(4);
+    });
+
+    it('reads the first 100 aliases and parents of a tag line, and says it left out the others', async () => {
+      const names = (prefix: string): string[] =>
+        Array.from({ length: 101 }, (_, index) => `${prefix} ${index}`);
+      await write([
+        header(),
+        JSON.stringify({ tag: 'Full', aliases: names('alias'), parents: names('parent') }),
+        end(0, 1),
+      ]);
+
+      const parsed = await read();
+      expect(parsed.definitions[0]?.aliases).toEqual(names('alias').slice(0, 100));
+      expect(parsed.definitions[0]?.parents).toEqual(names('parent').slice(0, 100));
+      expect(parsed.problems).toEqual(['Line 2: an alias or a parent tag was left out.']);
+    });
+
+    it('refuses a tags export whose end line does not count its tag lines', async () => {
+      const paris = JSON.stringify({ tag: 'Paris' });
+      await write([header(), paris, entry(), trailer(1)]);
+      await expect(read()).rejects.toThrow(INCOMPLETE);
+      await write([header(), paris, entry(), end(1, 2)]);
+      await expect(read()).rejects.toThrow(INCOMPLETE);
+      // Without tag lines, the end line may leave their count out.
+      await write([header(), entry(), trailer(1)]);
+      await expect(read()).resolves.toMatchObject({ definitions: [] });
+    });
   });
 
   it('accepts a BOM and CRLF, and ignores blank lines and unknown keys', async () => {
@@ -573,7 +688,7 @@ describe('tags export files', () => {
     expect(Buffer.byteLength(longest) - 1).toBeLessThanOrEqual(MAX_LINE_BYTES);
 
     for (const line of [written, longest]) {
-      await writeFile(file, [headerLine({ ...HEADER, roots }), line, endLine(1)].join(''));
+      await writeFile(file, [headerLine({ ...HEADER, roots }), line, endLine(1, 0)].join(''));
       const parsed = await read();
       expect(parsed.problems).toEqual([]);
       expect(parsed.entries).toEqual([
@@ -870,7 +985,7 @@ describe('tags export files', () => {
       contentHash: null,
       missing: false,
     };
-    await writeFile(file, [headerLine(HEADER), entryLine(row, 0, held), endLine(1)].join(''));
+    await writeFile(file, [headerLine(HEADER), entryLine(row, 0, held), endLine(1, 0)].join(''));
     const parsed = await read();
     expect(parsed.problems).toEqual([]);
     expect(parsed.entries[0]?.tags).toEqual(held);

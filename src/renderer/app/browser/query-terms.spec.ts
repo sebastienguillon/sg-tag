@@ -1,4 +1,4 @@
-import { hasTerm, toggleTerm } from './query-terms';
+import { hasTerm, holdsTagOrText, toggleTerm } from './query-terms';
 
 describe('query terms', () => {
   it('finds a whole term, ignoring case, but not inside quotes, other terms or negations', () => {
@@ -8,6 +8,32 @@ describe('query terms', () => {
     expect(hasTerm('"summer is:untagged"', 'is:untagged')).toBe(false);
     expect(hasTerm('is:untaggedness', 'is:untagged')).toBe(false);
     expect(hasTerm('', 'is:untagged')).toBe(false);
+  });
+
+  it('tells a query that compares names of tags, by a tag: term or free text, from others', () => {
+    for (const query of [
+      'tag:France',
+      'T:Paris,Lyon type:image',
+      '-tag:=draft',
+      'beach',
+      '-beach is:untagged',
+      '"summer trip"',
+      'camera:canon',
+      '"is:untagged"',
+    ]) {
+      expect(holdsTagOrText(query)).toBe(true);
+    }
+    for (const query of [
+      '',
+      '  ',
+      'is:untagged',
+      'IS:Untagged -is:missing',
+      'type:video ext:mp4,mov size:>10mb',
+      'in:"C:/My Photos" folder:/Volumes/Archive path:Trips',
+      'kind:photo format:jpg is:',
+    ]) {
+      expect(holdsTagOrText(query)).toBe(false);
+    }
   });
 
   it('appends a missing term, keeping the rest of the query', () => {

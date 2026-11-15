@@ -21,6 +21,7 @@ const exported: TagExportResult = {
   files: 1_234,
   missing: 0,
   tags: 12,
+  definitions: 0,
   leftOut: 0,
 };
 
@@ -34,6 +35,9 @@ const source: TagImportSource = {
   invalid: 0,
   problems: [],
 };
+
+/** A tags export that describes no tag: it adds no alias or parent tag. */
+const definitions = { created: 0, aliases: 0, links: 0, skipped: 0 };
 
 const preview: TagImportPreview = {
   planId: 1,
@@ -56,6 +60,15 @@ const preview: TagImportPreview = {
   missedItems: [],
   additions: { assignments: 4, files: 3, newTags: 0 },
   additionsWithChanged: { assignments: 4, files: 3, newTags: 0 },
+  definitions: {
+    ...definitions,
+    createdItems: [],
+    aliasItems: [],
+    linkItems: [],
+    knownAs: 0,
+    knownAsItems: [],
+    skippedItems: [],
+  },
 };
 
 const status = (tagTransfer: TagTransferProgress | null): IndexStatus => ({
@@ -221,7 +234,14 @@ describe('StatusBar', () => {
     expect(text(host(bar))).toContain('Importing tags · 1 of 3 files');
 
     // Two of the files went to the Trash during the import, say.
-    applying.resolve({ assignments: 1, files: 1, newTags: 0, skipped: 2, notFound: 0 });
+    applying.resolve({
+      assignments: 1,
+      files: 1,
+      newTags: 0,
+      skipped: 2,
+      notFound: 0,
+      definitions,
+    });
     worker.emit('status', status(null));
     await render();
     expect(text(host(bar))).not.toContain('Importing tags');
@@ -245,7 +265,14 @@ describe('StatusBar', () => {
     button('Import tags')?.click();
     await render();
     await showLibrary();
-    applying.resolve({ assignments: 4, files: 3, newTags: 0, skipped: 0, notFound: 0 });
+    applying.resolve({
+      assignments: 4,
+      files: 3,
+      newTags: 0,
+      skipped: 0,
+      notFound: 0,
+      definitions,
+    });
     await render();
     expect(notice()).toBeNull();
 
@@ -255,7 +282,14 @@ describe('StatusBar', () => {
     await render();
     button('Import tags')?.click();
     await render();
-    applying.resolve({ assignments: 1, files: 1, newTags: 0, skipped: 2, notFound: 0 });
+    applying.resolve({
+      assignments: 1,
+      files: 1,
+      newTags: 0,
+      skipped: 2,
+      notFound: 0,
+      definitions,
+    });
     await render();
     await showLibrary();
     expect(notice()).toBeNull();
