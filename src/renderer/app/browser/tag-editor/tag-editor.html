@@ -1,0 +1,245 @@
+<section class="editor" [attr.aria-labelledby]="titleId">
+  <header class="header">
+    <h4 class="title" [id]="titleId">Edit tag</h4>
+    <button
+      type="button"
+      class="icon-button"
+      aria-label="Close tag editor"
+      title="Close"
+      (click)="close()"
+    >
+      <app-icon name="x" />
+    </button>
+  </header>
+
+  @if (gone()) {
+    <p class="gone">This tag no longer exists.</p>
+    <div class="actions">
+      <button #goneClose type="button" class="button" (click)="close()">Close</button>
+    </div>
+  } @else if (shown(); as details) {
+    <label class="name">
+      <span class="label">Name</span>
+      <input
+        #nameField
+        type="text"
+        class="text-field"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="nameText()"
+        [attr.aria-invalid]="refusals().name === null ? null : 'true'"
+        [attr.aria-describedby]="refusals().name === null ? null : nameRefusalId"
+        (input)="onNameInput($event)"
+        (keydown)="onNameKeydown($event)"
+      />
+    </label>
+    @if (renaming()) {
+      <label class="keep">
+        <input type="checkbox" [checked]="keepOldName()" (change)="setKeepOldName($event)" />
+        Keep “{{ details.tag.name }}” as an alias
+      </label>
+    }
+    @if (refusals().name; as refusal) {
+      <p class="error" role="alert" [id]="nameRefusalId">{{ refusal.message }}</p>
+      @if (refusal.mergeFrom; as owner) {
+        <button
+          #offerFromName
+          type="button"
+          class="button offer"
+          (click)="offerMerge(owner, offerFromName)"
+        >
+          Merge {{ owner.name }} into {{ details.tag.name }}…
+        </button>
+      }
+    }
+    <p class="counts">{{ counts() }}</p>
+
+    <h5>Parent tags</h5>
+    <app-tag-input
+      #parentPicker
+      label="Add a parent tag"
+      [exclude]="parentIds()"
+      [disabled]="parentRefusals()"
+      (add)="addParent($event)"
+    />
+    @if (refusals().parents; as refusal) {
+      <p class="error" role="alert">{{ refusal.message }}</p>
+    }
+    @if (details.parents.length > 0) {
+      <ul class="chips" aria-label="Parent tags">
+        @for (parent of details.parents; track parent.id) {
+          <li class="chip">
+            <button
+              type="button"
+              class="chip-label"
+              [title]="`Search ${tagSearch(parent)}`"
+              (click)="searchTag(parent)"
+            >
+              {{ parent.name }}
+            </button>
+            <button
+              type="button"
+              class="chip-remove"
+              [attr.aria-label]="`Remove parent tag ${parent.name}`"
+              (click)="removeParent(parent)"
+            >
+              <app-icon name="x" />
+            </button>
+          </li>
+        }
+      </ul>
+    }
+
+    <h5>Child tags</h5>
+    <app-tag-input
+      #childPicker
+      label="Add a child tag"
+      [exclude]="childIds()"
+      [disabled]="childRefusals()"
+      (add)="addChild($event)"
+    />
+    @if (refusals().children; as refusal) {
+      <p class="error" role="alert">{{ refusal.message }}</p>
+    }
+    @if (details.children.length > 0) {
+      <ul class="chips" aria-label="Child tags">
+        @for (child of details.children; track child.id) {
+          <li class="chip">
+            <button
+              type="button"
+              class="chip-label"
+              [title]="`Search ${tagSearch(child)}`"
+              (click)="searchTag(child)"
+            >
+              {{ child.name }}
+            </button>
+            <button
+              type="button"
+              class="chip-remove"
+              [attr.aria-label]="`Remove child tag ${child.name}`"
+              (click)="removeChild(child)"
+            >
+              <app-icon name="x" />
+            </button>
+          </li>
+        }
+      </ul>
+    }
+
+    <h5>Aliases</h5>
+    <div class="field">
+      <input
+        #aliasField
+        type="text"
+        aria-label="Add an alias"
+        placeholder="Add an alias"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="aliasText()"
+        [attr.aria-invalid]="refusals().aliases === null ? null : 'true'"
+        [attr.aria-describedby]="refusals().aliases === null ? null : aliasRefusalId"
+        (input)="onAliasInput($event)"
+        (keydown)="onAliasKeydown($event)"
+      />
+    </div>
+    @if (refusals().aliases; as refusal) {
+      <p class="error" role="alert" [id]="aliasRefusalId">{{ refusal.message }}</p>
+      @if (refusal.mergeFrom; as owner) {
+        <button
+          #offerFromAlias
+          type="button"
+          class="button offer"
+          (click)="offerMerge(owner, offerFromAlias)"
+        >
+          Merge {{ owner.name }} into {{ details.tag.name }}…
+        </button>
+      }
+    }
+    @if (details.tag.aliases.length > 0) {
+      <ul class="chips" aria-label="Aliases">
+        @for (alias of details.tag.aliases; track alias) {
+          <li class="chip">
+            <span class="chip-label">{{ alias }}</span>
+            <button
+              type="button"
+              class="chip-remove"
+              [attr.aria-label]="`Remove alias ${alias}`"
+              (click)="removeAlias(alias)"
+            >
+              <app-icon name="x" />
+            </button>
+          </li>
+        }
+      </ul>
+    }
+
+    <div class="actions">
+      <button
+        #mergeOpener
+        type="button"
+        class="button"
+        [attr.aria-expanded]="pickingMerge()"
+        (click)="toggleMergePicker(mergeOpener)"
+      >
+        Merge into…
+      </button>
+      <button #deleteOpener type="button" class="button danger" (click)="askDelete(deleteOpener)">
+        <app-icon name="trash" /> Delete tag…
+      </button>
+    </div>
+    @if (pickingMerge()) {
+      <div #mergeArea class="merge-picker">
+        <app-tag-input
+          #mergePicker
+          label="Tag to merge into"
+          [allowNew]="false"
+          [disabled]="mergeRefusals()"
+          (add)="pickMergeTarget($event)"
+        />
+      </div>
+    }
+    @if (confirmation(); as asked) {
+      <div
+        class="confirm"
+        role="alertdialog"
+        aria-label="Confirm"
+        [attr.aria-describedby]="questionId"
+        (keydown.escape)="onConfirmEscape($event)"
+      >
+        @if (asked.kind === 'delete') {
+          <p [id]="questionId">{{ deleteText() }}</p>
+        } @else {
+          <p [id]="questionId">{{ mergeText()?.question }}</p>
+        }
+        <div class="actions">
+          <button
+            #cancelButton
+            type="button"
+            class="button"
+            [disabled]="confirming()"
+            (click)="cancel()"
+          >
+            Cancel
+          </button>
+          @if (asked.kind === 'delete') {
+            <button
+              type="button"
+              class="button danger"
+              [disabled]="confirming()"
+              (click)="deleteTag()"
+            >
+              Delete tag
+            </button>
+          } @else if (mergeText()?.allowed) {
+            <button type="button" class="button danger" [disabled]="confirming()" (click)="merge()">
+              Merge
+            </button>
+          }
+        </div>
+        @if (confirmError(); as error) {
+          <p class="error" role="alert">{{ error }}</p>
+        }
+      </div>
+    }
+  }
+</section>

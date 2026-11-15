@@ -16,6 +16,9 @@ Tag and retrieve the images and videos on your computer, fast. macOS, Windows an
 - Tags are plain names (`Japan 2024`, `Ana`). Letter case never distinguishes two tags, accents do,
   and search ignores both: `tag:ete` finds the files tagged `Été`. Characters nobody sees, such as
   a zero-width space pasted from a web page, never distinguish two tags either.
+- Tags can have aliases and parent tags: put `Paris` below `France`, and `tag:France` also finds
+  the files tagged Paris (`tag:=France` finds France itself only). Edit a tag from the details
+  panel: the pencil next to it, or Enter on “already added” in the tag input.
 - Finds identical files (Find duplicates in the toolbar, `is:duplicate`): give the copies the same
   tags, or move the ones you do not need to the Trash.
 - **Files are never modified.** Tags live in the app's own database (see [Tags and files](#tags-and-files)).

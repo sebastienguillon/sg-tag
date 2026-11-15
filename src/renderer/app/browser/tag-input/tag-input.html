@@ -4,11 +4,11 @@
     #input
     type="text"
     role="combobox"
-    aria-label="Add a tag"
     aria-autocomplete="list"
-    placeholder="Add a tag"
     spellcheck="false"
     autocomplete="off"
+    [attr.aria-label]="label()"
+    [placeholder]="label()"
     [attr.aria-expanded]="expanded()"
     [attr.aria-controls]="listId"
     [attr.aria-activedescendant]="activeId()"
@@ -26,17 +26,30 @@
 }
 @if (expanded()) {
   <ul class="suggestions" role="listbox" [id]="listId">
-    @for (tag of suggestions(); track tag.id) {
-      <li role="option" [id]="`${listId}-${$index}`" [attr.aria-selected]="$index === active()">
+    @for (row of rows(); track row.key) {
+      <li
+        role="option"
+        [id]="`${listId}-${$index}`"
+        [attr.aria-selected]="$index === active()"
+        [attr.aria-disabled]="row.action === 'refuse' ? 'true' : null"
+      >
         <button
           type="button"
           tabindex="-1"
           [class.active]="$index === active()"
+          [class.disabled]="row.action === 'refuse'"
           (mousedown)="$event.preventDefault()"
-          (click)="commit(tag.name)"
+          (click)="choose(row)"
         >
-          <span class="name">{{ tag.name }}</span>
-          <span class="count">{{ tag.fileCount }}</span>
+          <span class="name"
+            ><span class="label">{{ row.label }}</span>
+            @if (row.note !== null) {
+              <span class="note">: {{ row.note }}</span>
+            }
+          </span>
+          @if (row.count !== null) {
+            <span class="count">{{ row.count }}</span>
+          }
         </button>
       </li>
     }

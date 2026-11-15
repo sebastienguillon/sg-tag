@@ -291,23 +291,22 @@ belongs to a later step:
 - `TagImportAdditions.newTags` no longer counts the tags that the tag lines make
   (`TagDefinitionCounts.created`), so the interface adds the two.
 
-**Pull request 3**
+**Settled in pull request 3**
 
-- The search help documents `tag:=Name`, aliases and parent tags, and the convention for
-  look-alikes with a quoted example: `tag:"Paris (Texas)"`.
-- Tag input: a name typed without its accents picks the one existing tag it matches (`Egypte` for
-  `Égypte`). Suggestions are ranked as built in pull request 1: the name typed, then names starting
-  with the text, then a word of the name starting with it, then the rest; alias matching builds on
-  that.
-- Tag input: ⌘/Ctrl-comma must not add what is typed as a tag (the comma case ignores modifiers).
-- A failed `addTags`, `removeTags` or `shareTagsWithCopies` call says nothing in the panel: treat
-  the three together.
-- The merge confirmation needs a read of its own (files moved, files that had both, and the `loop`
-  or `limit` the merge would answer): `TagDetails` describes one tag only.
-- Delete can answer `limit` (a child tag would have more than 100 parent tags): the editor words
-  it, and `TagDetails` does not say beforehand that a delete would be refused.
+- Two worker calls for the editor: `addTagChild` (`addTagParent` seen from the parent, making the
+  child when no tag has its name) and `getMergePreview` (files moved, files that had both, and the
+  refusal the merge would answer, from the same checks as the merge).
+- The editor is a component keyed by tag id, independent of the selection; the details panel closes
+  it when the selection changes. Pickers are the tag input with tags shown disabled and their reason.
+- The delete confirmation does not say how many files the parent tags stop finding: `TagDetails`
+  cannot tell whether such a file has another tag below them, so the number could be false.
+
+**Pull request 4**
+
 - Listing tags sorts in JavaScript after every tagging: at thousands of tags, keep the sorted
-  order until a name changes.
+  order until a name changes. The tags page is where thousands of tags are listed.
+- The merge preview does not say whether the merged tag has aliases, parent or child tags: the
+  editor reads them from the tags the renderer holds, which can be a moment out of date.
 
 **Outside this plan** (older than it, found on the way)
 

@@ -65,6 +65,16 @@
           </button>
           @if (!fileTrashed()) {
             <button
+              #editButton
+              type="button"
+              class="chip-edit"
+              [attr.aria-label]="`Edit tag ${tag.name}`"
+              [title]="`Edit tag ${tag.name}`"
+              (click)="openEditor(tag.id, editButton)"
+            >
+              <app-icon name="pencil" />
+            </button>
+            <button
               type="button"
               class="chip-remove"
               [attr.aria-label]="`Remove tag ${tag.name}`"
@@ -78,11 +88,46 @@
         <li class="no-tags">No tags yet</li>
       }
     </ul>
+    @if (foundUnder().length > 0) {
+      <p class="found-under">
+        @for (part of foundUnder(); track $index) {
+          @if (part.tag; as tag) {
+            <button
+              type="button"
+              class="link"
+              [title]="`Search ${tagSearch(tag)}`"
+              (click)="searchTag(tag)"
+            >
+              {{ tag.name }}
+            </button>
+          } @else {
+            <span>{{ part.text }}</span>
+          }
+        }
+      </p>
+    }
     @if (!fileTrashed()) {
-      <app-tag-input [exclude]="completeTags()" (add)="addTag($event)" />
+      <app-tag-input
+        [added]="completeTags()"
+        (add)="addTag($event)"
+        (edit)="openEditor($event, null)"
+      />
       @if (tagRefusal(); as refusal) {
         <p class="error" role="alert">{{ refusal }}</p>
       }
+    }
+    @if (changeError(); as error) {
+      <p class="error" role="alert">{{ error }}</p>
+    }
+    @if (editing(); as id) {
+      <app-tag-editor
+        class="editor"
+        [tagId]="id"
+        (tagIdChange)="setEditing($event)"
+        (closed)="closeEditor()"
+        (deleted)="closeEditor(true)"
+        (searchRequested)="setQuery($event)"
+      />
     }
   </section>
 

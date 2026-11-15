@@ -1,7 +1,16 @@
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed } from '@angular/core/testing';
 import type { DesktopBridge } from '@shared/desktop-api';
-import type { FileCopy, FileDetails, Tag, TagAddOutcome } from '@shared/model';
+import type {
+  FileCopy,
+  FileDetails,
+  Tag,
+  TagAddOutcome,
+  TagDeleteResult,
+  TagDetails,
+  TagEditResult,
+  TagUsage,
+} from '@shared/model';
 import { DESKTOP } from '../../core/desktop';
 import { LibraryStore } from '../../core/library-store';
 import { WorkerClient } from '../../core/worker-client';
@@ -43,12 +52,29 @@ const photo: FileDetails = {
   copies: [copy],
 };
 
-const tag = (id: number, name: string, fileCount: number): Tag => ({
+const tag = (
+  id: number,
+  name: string,
+  fileCount: number,
+  parentIds: readonly number[] = [],
+): Tag => ({
   id,
   name,
   aliases: [],
-  parentIds: [],
+  parentIds,
   fileCount,
+});
+
+/** What the tag editor reads of `of`: a tag without parent tags, child tags or files. */
+const tagDetails = (of: Tag): TagDetails => ({
+  tag: of,
+  parents: [],
+  children: [],
+  tagsBelow: 0,
+  ownFiles: 0,
+  filesWithBelow: 0,
+  taggedFiles: 0,
+  forgottenFiles: 0,
 });
 
 describe('DetailsPanel', () => {
@@ -265,7 +291,7 @@ describe('DetailsPanel', () => {
     expect(chip('Japan')?.querySelector('.chip-count')).toBeNull();
     expect(chip('Kansai')?.querySelector('.chip-count')?.textContent).toBe('1/2');
 
-    // Japan is on both files already; Kansai can still be given to the other one.
+    // Japan is on both files already, to be edited; Kansai can still be given to the other one.
     const field = host.querySelector<HTMLInputElement>('app-tag-input input')!;
     field.focus();
     field.value = 'a';
@@ -275,7 +301,7 @@ describe('DetailsPanel', () => {
       [...host.querySelectorAll('app-tag-input [role="option"] .name')].map(
         (name) => name.textContent,
       ),
-    ).toEqual(['Kansai', 'Osaka']);
+    ).toEqual(['Japan: already added — Enter to edit', 'Kansai', 'Osaka', 'a: new tag']);
   });
 
   it('lists identical copies with their location and tags', async () => {
@@ -422,6 +448,7 @@ describe('DetailsPanel', () => {
     expect(button('Open')).toBeUndefined();
     expect(button('Show in Finder')).toBeUndefined();
     expect(host.querySelector('.chip-remove')).toBeNull();
+    expect(host.querySelector('.chip-edit')).toBeNull();
     expect(host.querySelector('app-tag-input')).toBeNull();
     // Its copy is still on disk.
     expect(host.querySelector('.copy-path')?.textContent).toBe(copy.path);
@@ -522,5 +549,294 @@ describe('DetailsPanel', () => {
     await render();
     expect(host.querySelector('.error')?.textContent).toBe('No identical copy.');
     expect(document.activeElement).toBe(button('Cancel'));
+  });
+
+  describe('tag editor', () => {
+    const FRANCE = tag(20, 'France', 3);
+    const PARIS = tag(21, 'Paris', 5);
+    const LYON = tag(22, 'Lyon', 2);
+
+    /** The library holds `tags`, and the selected file carries `carried`. */
+    const library = async (tags: readonly Tag[], carried: readonly Tag[]): Promise<void> => {
+      worker.respond('listTags', () => tags);
+      worker.respond('getTagDetails', (id) => {
+        const found = tags.find((each) => each.id === id);
+        return found ? tagDetails(found) : null;
+      });
+      await reload({ ...photo, tags: carried.map(({ id, name }) => ({ id, name })) });
+    };
+    const tagInput = (): HTMLInputElement =>
+      host.querySelector<HTMLInputElement>('app-tag-input input')!;
+    const editorName = (): HTMLInputElement | null =>
+      host.querySelector<HTMLInputElement>('app-tag-editor .name input');
+    /** Presses a key in the control that has the focus. */
+    const press = async (key: string): Promise<KeyboardEvent> => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      document.activeElement?.dispatchEvent(event);
+      await render();
+      return event;
+    };
+    /** Types in the control that has the focus, as typing or pasting does. */
+    const type = async (text: string): Promise<void> => {
+      const field = document.activeElement as HTMLInputElement;
+      field.value = text;
+      field.dispatchEvent(new Event('input'));
+      await render();
+    };
+    /**
+     * Tab, which jsdom leaves alone: the page must not keep it, and the focus goes to the next
+     * control in the order of the page that the keyboard reaches.
+     */
+    const tab = async (): Promise<void> => {
+      const active = document.activeElement as HTMLElement;
+      expect((await press('Tab')).defaultPrevented).toBe(false);
+      const reachable = [
+        ...host.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea'),
+      ].filter((control) => control.tabIndex >= 0 && !control.hasAttribute('disabled'));
+      reachable[reachable.indexOf(active) + 1]?.focus();
+      await render();
+    };
+    /** A button of the tag editor, by its whole label. */
+    const editorButton = (label: string): HTMLButtonElement | undefined =>
+      [...host.querySelectorAll<HTMLButtonElement>('app-tag-editor button')].find(
+        (candidate) => candidate.textContent.trim() === label,
+      );
+    const highlighted = (): string | null =>
+      host.querySelector('app-tag-input [role="option"][aria-selected="true"] .name')
+        ?.textContent ?? null;
+
+    it('puts France above Paris from the keyboard, and ends in the tag input', async () => {
+      worker.respond('addTagParent', (): TagEditResult => ({
+        ok: true,
+        tag: { ...PARIS, parentIds: [FRANCE.id] },
+      }));
+      await library([FRANCE, PARIS], [PARIS]);
+
+      // T, in the grid.
+      fixture.componentInstance.focusTagInput();
+      await render();
+      expect(document.activeElement).toBe(tagInput());
+      await type('par');
+      await press('ArrowDown');
+      expect(highlighted()).toBe('Paris: already added — Enter to edit');
+      await press('Enter');
+      expect(worker.callsTo('addTags')).toEqual([]);
+      expect(editorName()?.value).toBe('Paris');
+      expect(document.activeElement).toBe(editorName());
+
+      await tab();
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('Add a parent tag');
+      await type('France');
+      await press('Enter');
+      expect(worker.callsTo('addTagParent')).toEqual([[PARIS.id, 'France']]);
+
+      await press('Escape');
+      expect(host.querySelector('app-tag-editor')).toBeNull();
+      expect(document.activeElement).toBe(tagInput());
+    });
+
+    it('opens below the chips from the edit button of a chip, and gives it the focus back on Escape', async () => {
+      await library([FRANCE, PARIS], [FRANCE, PARIS]);
+      const edit = host.querySelector<HTMLButtonElement>('[aria-label="Edit tag Paris"]');
+      expect(edit?.title).toBe('Edit tag Paris');
+      edit?.focus();
+      edit?.click();
+      await render();
+      expect(host.querySelector('.tags app-tag-editor')).not.toBeNull();
+      expect(document.activeElement).toBe(editorName());
+      expect(editorName()?.value).toBe('Paris');
+
+      // One editor at a time: another chip's button shows that tag in it.
+      host.querySelector<HTMLButtonElement>('[aria-label="Edit tag France"]')?.click();
+      await render();
+      expect(host.querySelectorAll('app-tag-editor')).toHaveLength(1);
+      expect(editorName()?.value).toBe('France');
+      expect(document.activeElement).toBe(editorName());
+
+      await press('Escape');
+      expect(host.querySelector('app-tag-editor')).toBeNull();
+      expect(document.activeElement).toBe(host.querySelector('[aria-label="Edit tag France"]'));
+    });
+
+    it('searches the parent and child tags clicked in the editor', async () => {
+      await library([FRANCE, PARIS], [PARIS]);
+      worker.respond('getTagDetails', () => ({
+        ...tagDetails(PARIS),
+        parents: [{ id: FRANCE.id, name: FRANCE.name }],
+      }));
+      host.querySelector<HTMLButtonElement>('[aria-label="Edit tag Paris"]')?.click();
+      await render();
+      host.querySelector<HTMLButtonElement>('app-tag-editor .chip-label')?.click();
+      expect(TestBed.inject(LibraryStore).query()).toBe('tag:France');
+    });
+
+    it('closes once the tag is deleted, the focus in the tag input when its chip went', async () => {
+      worker.respond('deleteTag', (): TagDeleteResult => ({ ok: true }));
+      await library([FRANCE, PARIS], [FRANCE, PARIS]);
+      host.querySelector<HTMLButtonElement>('[aria-label="Edit tag Paris"]')?.click();
+      await render();
+      editorButton('Delete tag…')?.click();
+      await render();
+      // The worker answers before telling that tags changed: the chip goes only then.
+      worker.respond('getDetails', () => ({ ...photo, tags: [{ id: FRANCE.id, name: 'France' }] }));
+      editorButton('Delete tag')?.click();
+      worker.emit('tagsChanged', null);
+      await render();
+      expect(worker.callsTo('deleteTag')).toEqual([[PARIS.id]]);
+      expect(host.querySelector('app-tag-editor')).toBeNull();
+      expect(document.activeElement).toBe(tagInput());
+    });
+
+    it('follows the tag it merged its own into', async () => {
+      worker.respond('getMergePreview', () => ({
+        from: { id: PARIS.id, name: 'Paris' },
+        into: { id: LYON.id, name: 'Lyon' },
+        filesMoved: 1,
+        filesWithBoth: 0,
+        refusal: null,
+      }));
+      worker.respond('mergeTags', (): TagEditResult => ({ ok: true, tag: LYON }));
+      await library([LYON, PARIS], [PARIS]);
+      host.querySelector<HTMLButtonElement>('[aria-label="Edit tag Paris"]')?.click();
+      await render();
+      editorButton('Merge into…')?.click();
+      await render();
+      await type('Lyon');
+      await press('Enter');
+      editorButton('Merge')?.click();
+      await render();
+      expect(editorName()?.value).toBe('Lyon');
+    });
+
+    it('closes once other files are selected', async () => {
+      await library([FRANCE, PARIS], [PARIS]);
+      host.querySelector<HTMLButtonElement>('[aria-label="Edit tag Paris"]')?.click();
+      await render();
+      expect(host.querySelector('app-tag-editor')).not.toBeNull();
+
+      const other: FileDetails = { ...photo, id: 4, name: 'dunes.jpg', copies: [] };
+      worker.respond('getDetails', (id) => (id === other.id ? other : photo));
+      TestBed.inject(LibraryStore).selection.set(new Set([other.id]));
+      await render();
+      expect(host.querySelector('app-tag-editor')).toBeNull();
+    });
+  });
+
+  describe('also found under', () => {
+    const EUROPE = tag(30, 'Europe', 1);
+    const FRANCE = tag(31, 'France', 1, [30]);
+    const JAPAN = tag(32, 'Japan', 1);
+    const PARIS = tag(33, 'Paris', 1, [31]);
+    const TOKYO = tag(34, 'Tokyo', 1, [32]);
+    const LIBRARY = [EUROPE, FRANCE, JAPAN, PARIS, TOKYO];
+
+    const carrying = async (carried: readonly Tag[]): Promise<void> => {
+      worker.respond('listTags', () => LIBRARY);
+      await reload({ ...photo, tags: carried.map(({ id, name }) => ({ id, name })) });
+    };
+    /** The line as it reads: the spaces inside a button around its text are not drawn. */
+    const line = (): string | null => {
+      const found = host.querySelector('.found-under');
+      return found
+        ? [...found.children]
+            .map((part) =>
+              part instanceof HTMLButtonElement ? part.textContent.trim() : part.textContent,
+            )
+            .join('')
+        : null;
+    };
+
+    it('lists the tags above those of the file, once each, after the tag they are reached from', async () => {
+      await carrying([PARIS, TOKYO]);
+      expect(line()).toBe(
+        'Also found under: France, Europe (through Paris) · Japan (through Tokyo)',
+      );
+
+      // A tag found from two tags of the file comes after the first of them by name, and a tag
+      // of the file is not listed again.
+      await carrying([FRANCE, PARIS, TOKYO]);
+      expect(line()).toBe('Also found under: Europe (through France) · Japan (through Tokyo)');
+    });
+
+    it('searches a tag clicked in the line', async () => {
+      await carrying([PARIS]);
+      const europe = [...host.querySelectorAll<HTMLButtonElement>('.found-under button')].find(
+        (candidate) => candidate.textContent.trim() === 'Europe',
+      );
+      expect(europe?.title).toBe('Search tag:Europe');
+      europe?.click();
+      expect(TestBed.inject(LibraryStore).query()).toBe('tag:Europe');
+    });
+
+    it('says nothing when no tag is above those of the file', async () => {
+      await carrying([EUROPE, JAPAN]);
+      expect(line()).toBeNull();
+    });
+  });
+
+  it('keeps the chips of several files while their tags are read again', async () => {
+    worker.respond('getSelectionTags', () => [{ id: 10, name: 'Japan', fileCount: 2 }]);
+    TestBed.inject(LibraryStore).selection.set(new Set([photo.id, 4]));
+    await render();
+    const japan = chip('Japan');
+    expect(japan).toBeDefined();
+
+    const answer = Promise.withResolvers<readonly TagUsage[]>();
+    worker.respond('getSelectionTags', () => answer.promise);
+    worker.emit('tagsChanged', null);
+    // Not `render`: the fixture is not stable while the tags are being read.
+    await settle();
+    TestBed.tick();
+    expect(worker.callsTo('getSelectionTags')).toHaveLength(2);
+    expect(chip('Japan')).toBe(japan);
+
+    answer.resolve([
+      { id: 10, name: 'Japan', fileCount: 2 },
+      { id: 11, name: 'Kansai', fileCount: 1 },
+    ]);
+    await render();
+    expect(chip('Japan')).toBe(japan);
+    expect(chip('Kansai')).toBeDefined();
+  });
+
+  describe('when a change to the tags fails', () => {
+    /** The lines of the panel that say why a change to the tags was not made. */
+    const failures = (): string[] =>
+      [...host.querySelectorAll('.tags > [role="alert"]')].map((alert) => alert.textContent);
+
+    it('says so for a tag added, until the next attempt', async () => {
+      worker.respond('addTags', () => Promise.reject(new Error('The indexer stopped')));
+      await addTag('Kyoto');
+      expect(failures()).toEqual(['The change could not be made: The indexer stopped']);
+
+      worker.respond('addTags', () => new Promise<readonly TagAddOutcome[]>(() => undefined));
+      await addTag('Osaka');
+      expect(failures()).toEqual([]);
+    });
+
+    it('says so for a tag removed, and for tags given to copies', async () => {
+      worker.respond('removeTags', () => Promise.reject(new Error('No such file')));
+      host.querySelector<HTMLButtonElement>('[aria-label="Remove tag Japan"]')?.click();
+      await render();
+      expect(failures()).toEqual(['The change could not be made: No such file']);
+
+      worker.respond('shareTagsWithCopies', () => Promise.reject(new Error('Disk full')));
+      button('Give all copies the same tags')?.click();
+      await render();
+      expect(failures()).toEqual(['The change could not be made: Disk full']);
+    });
+
+    it('forgets it once other files are selected', async () => {
+      worker.respond('removeTags', () => Promise.reject(new Error('No such file')));
+      host.querySelector<HTMLButtonElement>('[aria-label="Remove tag Japan"]')?.click();
+      await render();
+      expect(failures()).toHaveLength(1);
+
+      const other: FileDetails = { ...photo, id: 4, name: 'dunes.jpg', copies: [] };
+      worker.respond('getDetails', (id) => (id === other.id ? other : photo));
+      TestBed.inject(LibraryStore).selection.set(new Set([other.id]));
+      await render();
+      expect(failures()).toEqual([]);
+    });
   });
 });

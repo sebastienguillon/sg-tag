@@ -17,6 +17,7 @@ import type {
   TagImportPreview,
   TagImportResult,
   TagImportSource,
+  TagMergePreview,
   TagUsage,
 } from './model';
 
@@ -58,6 +59,12 @@ export interface LibraryApi {
   readonly addTagParent: (id: number, parentName: string) => TagEditResult;
   readonly removeTagParent: (id: number, parentId: number) => TagEditResult;
   /**
+   * Puts the tag that `childName` names (by its name or an alias) below the tag, making that tag
+   * when no tag has the name: `addTagParent` seen from the parent, which is answered. `loop` when
+   * that tag is the tag itself or above it.
+   */
+  readonly addTagChild: (id: number, childName: string) => TagEditResult;
+  /**
    * Deletes a tag: its files lose it, its aliases go, and its child tags move up to its parent
    * tags, so that the tags above still find their files. `limit`, deleting nothing, when one of its
    * child tags would then have more parent tags than a tag may.
@@ -71,6 +78,11 @@ export interface LibraryApi {
   readonly mergeTags: (fromId: number, intoId: number) => TagEditResult;
   /** What deleting or editing a tag is about to affect; `null` when it no longer exists. */
   readonly getTagDetails: (id: number) => TagDetails | null;
+  /**
+   * What `mergeTags(fromId, intoId)` would do, writing nothing, to ask for a confirmation; `null`
+   * when either tag is gone, or both are one.
+   */
+  readonly getMergePreview: (fromId: number, intoId: number) => TagMergePreview | null;
   /** Checks the whole library for identical files; resolves to how many files have a copy. */
   readonly findDuplicates: () => number;
   /** Gives a file and each of its identical copies the tags of all of them. */
