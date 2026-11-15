@@ -286,6 +286,8 @@ describe('tags export files', () => {
     expect(readsHeader(headerLine({ ...HEADER, roots: [`/${'x'.repeat(32_767)}`] }))).toBe(false);
   });
 
+  // About 2.5 s alone, but over 5 s while the other test files run alongside: past the default
+  // timeout, it would fail, and its read would go on into the next test, which uses the same file.
   it('reads a header and a line at their limits, made slow to normalise, a little at a time', async () => {
     // Library folders at the longest path, of marks NFC would take 650 ms each to sort, as many as
     // the longest header holds.
@@ -329,7 +331,7 @@ describe('tags export files', () => {
     parse.mockClear();
     await expect(read()).rejects.toThrow(NOT_AN_EXPORT);
     expect(parse).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it('asks to update SG Tag for a newer version', async () => {
     await write([header({ version: 2, roots: 'another shape' }), entry(), trailer(1)]);
