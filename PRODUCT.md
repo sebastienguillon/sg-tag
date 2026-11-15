@@ -73,6 +73,8 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   (`untagged`, `tagged`, `missing`, `offline`, `duplicate`), and a leading `-` to exclude.
 - Keyboard: ⌘/Ctrl-F or `/` to search, `T` to tag the selection, ⌘/Ctrl-, for Settings, and grid
   navigation and selection from the keyboard.
+- Zoom: ⌘/Ctrl with `+` or `=`, `-` and `0` (keypad too, on any keyboard layout), Ctrl + mouse wheel
+  on Windows and Linux, or the View menu; 50% to 300%, remembered across launches.
 - Settings: library folders (add, remove, file and tagged counts, offline state), tags (data folder,
   Export tags… and Import tags…), and diagnostics.
 - Tags export and import: a tags export lists every tagged file (missing and offline ones included)

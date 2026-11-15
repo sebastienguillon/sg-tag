@@ -1,7 +1,8 @@
 import { createLogger } from '@shared/log';
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, Menu, session } from 'electron';
 import path from 'node:path';
 import { registerIpc } from './ipc';
+import { applicationMenu } from './menu';
 import { APP_ORIGIN, contentSecurityPolicy, handleProtocols, registerSchemes } from './protocols';
 import { createMainWindow } from './window';
 import { WorkerHost } from './worker-host';
@@ -31,6 +32,7 @@ if (app.requestSingleInstanceLock()) {
 
 async function main(): Promise<void> {
   await app.whenReady();
+  Menu.setApplicationMenu(applicationMenu());
 
   const dataDir = app.getPath('userData');
   const worker = new WorkerHost({

@@ -59,9 +59,12 @@
   }
 }
 
-/* Room for the traffic lights of the macOS hidden-inset title bar. */
+/*
+ * Room for the traffic lights of the macOS hidden-inset title bar. They do not zoom with the page, so
+ * the room is divided by the zoom (`--zoom`, set by the main process) to keep the same width on screen.
+ */
 :root[data-platform='darwin'] {
-  --titlebar-inset: 68px;
+  --titlebar-inset: calc(68px / var(--zoom, 1));
 }
 
 *,
