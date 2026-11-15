@@ -1,13 +1,24 @@
-import { DatePipe, DecimalPipe } from '@angular/common';
-import { Component, computed, inject, input, linkedSignal, viewChild } from '@angular/core';
+import { DatePipe, DecimalPipe, formatNumber } from '@angular/common';
+import {
+  Component,
+  computed,
+  inject,
+  input,
+  linkedSignal,
+  LOCALE_ID,
+  viewChild,
+} from '@angular/core';
 import type { ElementRef } from '@angular/core';
 import type {
   TagImportMissReason,
   TagImportPreview as Preview,
+  TagImportSkip,
   TagImportSource,
 } from '@shared/model';
+import { MAX_TAG_ALIASES, MAX_TAG_PARENTS } from '@shared/tag-names';
 import { ipcErrorMessage } from '../../core/desktop';
 import { Icon } from '../../ui/icon/icon';
+import { importAdditions } from './tag-import-words';
 import { TagTransferStore } from './tag-transfer-store';
 
 /** A map, not an object: a platform named after an `Object.prototype` member gets no label. */
@@ -24,6 +35,12 @@ const REASON_LABELS: Readonly<Record<TagImportMissReason, string>> = {
   notFound: 'not found',
 };
 
+/** An alias or a parent tag that importing leaves out, and why, in words. */
+interface SkipLine {
+  readonly what: string;
+  readonly why: string;
+}
+
 /** Why a library folder could not be added. */
 interface AddError {
   readonly folder: string;
@@ -31,6 +48,29 @@ interface AddError {
 }
 
 let nextId = 0;
+
+/** `skip` in words; `locale` writes the limits as the `number` pipe would. */
+function skipLine(skip: TagImportSkip, locale: string): SkipLine {
+  switch (skip.kind) {
+    case 'aliasTaken':
+      return {
+        what: `${skip.alias} as an alias of ${skip.tag}`,
+        why: `already a name of ${skip.owner}`,
+      };
+    case 'aliasLimit':
+      return {
+        what: `${skip.alias} as an alias of ${skip.tag}`,
+        why: `${skip.tag} would have more than ${formatNumber(MAX_TAG_ALIASES, locale)} aliases`,
+      };
+    case 'loop':
+      return { what: `${skip.parent} as a parent tag of ${skip.tag}`, why: 'would make a loop' };
+    case 'parentLimit':
+      return {
+        what: `${skip.parent} as a parent tag of ${skip.tag}`,
+        why: `${skip.tag} would have more than ${formatNumber(MAX_TAG_PARENTS, locale)} parent tags`,
+      };
+  }
+}
 
 /** What importing a tags export would add, and where its files were found, before importing it. */
 @Component({
@@ -42,6 +82,7 @@ let nextId = 0;
 })
 export class TagImportPreview {
   private readonly store = inject(TagTransferStore);
+  private readonly locale = inject(LOCALE_ID);
 
   readonly source = input.required<TagImportSource>();
   readonly preview = input.required<Preview>();
@@ -88,9 +129,42 @@ export class TagImportPreview {
   protected readonly additions = computed(() =>
     this.includeChanged() ? this.preview().additionsWithChanged : this.preview().additions,
   );
-  /** Nothing found or nothing to add: Close is the only way on. */
-  protected readonly canImport = computed(
+  /** Files found get tags they do not have yet. */
+  protected readonly tagsFiles = computed(
     () => !this.nothingFound() && this.additions().assignments > 0,
+  );
+  /** The tags the tags export describes add tags, aliases or parent tags, whatever the files. */
+  protected readonly definesTags = computed(() => {
+    const { created, aliases, links } = this.preview().definitions;
+    return created + aliases + links > 0;
+  });
+  /** Neither files nor tags get anything: Close is the only way on. */
+  protected readonly canImport = computed(() => this.tagsFiles() || this.definesTags());
+  /** Something to say of the tags the tags export describes: added, known, or left out. */
+  protected readonly showDefinitions = computed(() => {
+    const { created, aliases, links, knownAs, skipped } = this.preview().definitions;
+    return created + aliases + links + knownAs + skipped > 0;
+  });
+  /** What importing adds, as the summary says it after `Importing`. */
+  protected readonly adds = computed(() => {
+    const { definitions } = this.preview();
+    const toFiles = this.tagsFiles() ? this.additions() : { assignments: 0, files: 0, newTags: 0 };
+    return importAdditions(
+      {
+        assignments: toFiles.assignments,
+        files: toFiles.files,
+        // The tags described are made whether or not a file gets them; the others with a file.
+        newTags: definitions.created + toFiles.newTags,
+        aliases: definitions.aliases,
+        links: definitions.links,
+      },
+      'present',
+      this.locale,
+    );
+  });
+  /** The first aliases and parent tags importing leaves out, each with why. */
+  protected readonly skipped = computed(() =>
+    this.preview().definitions.skippedItems.map((skip) => skipLine(skip, this.locale)),
   );
   /** Where the files were found is worth showing only when it is not plainly where they were. */
   protected readonly showFolders = computed(() => {

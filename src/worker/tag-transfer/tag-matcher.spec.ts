@@ -50,6 +50,8 @@ const exportOf = (
 ): ParsedTagFile => ({
   header: { app: null, exportedAt: null, platform, roots },
   entries,
+  definitions: [],
+  tagCount: 1,
   invalid: 0,
   problems: [],
   tags: new Map([['t', 't']]),
@@ -183,7 +185,7 @@ describe.each([true, false])(
                 tags.get(row.id) ?? [],
               ),
             ),
-            endLine(rows.length),
+            endLine(rows.length, 0),
           ].join(''),
         );
         return readTagFile(exported, {
@@ -1507,7 +1509,7 @@ describe.each([true, false])(
             0,
             ['t'],
           ),
-          endLine(1),
+          endLine(1, 0),
         ].join(''),
       );
 

@@ -317,6 +317,11 @@ export class Library {
         // No duplicate check, unlike addTags: an import can tag thousands of files at once, and
         // checking them would read whole files. Find duplicates stays available.
       },
+      // Tags made, aliases or parent links added: searches by tag or by text may find other files.
+      onDefined: () => {
+        this.broadcast('tagsChanged', null);
+        this.broadcast('tagDefinitionsChanged', null);
+      },
       onProgress: () => {
         this.scheduleStatus();
       },

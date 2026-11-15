@@ -24,6 +24,7 @@ import {
   headerLine,
   MAX_TAG_FILE_BYTES,
   readsHeader,
+  tagLine,
 } from './tag-file';
 
 const log = createLogger('tag-transfer');
@@ -84,6 +85,10 @@ const NOT_SAVED: Reasons = {
 interface Written {
   readonly files: number;
   readonly missing: number;
+  /** Distinct tags: of the files, and of the tag lines. */
+  readonly tags: number;
+  /** Tag lines. */
+  readonly definitions: number;
   /**
    * Distinct tags not written for at least one file: it has more tags than a tags export holds for
    * one file (`exportedTags`).
@@ -104,9 +109,13 @@ interface Running {
 
 /**
  * Exports the tags of every tagged file, missing and offline ones included, to the file the user
- * chose. The whole export is written in the data folder first, so the chosen file is only opened
- * once there is something complete to put in it, and is deleted rather than left cut short if
- * saving fails or is stopped. One export runs at a time.
+ * chose, and every tag made or edited on purpose with its aliases and parent tags (a tag line),
+ * whether or not a file has it. The whole export is written in the data folder first, so the
+ * chosen file is only opened once there is something complete to put in it, and is deleted rather
+ * than left cut short if saving fails or is stopped. One export runs at a time.
+ *
+ * The tag lines are written first, from one read: no tag can be changed while tags are exported
+ * (the library answers `busy`), so they are those of one moment.
  *
  * Each tag is written by its name, and only the tags an import keeps are written (`exportedTags`),
  * so it reads every line whole. The library holds no name that an import refuses, so the only tags
@@ -169,10 +178,10 @@ export class TagExporter {
     if (this.current !== null) {
       throw new Error('A tags export is already being written.');
     }
-    const total = this.options.tags.taggedFileCount();
-    if (total === 0) {
-      throw new Error('Nothing to export yet: no file is tagged.');
+    if (this.options.tags.count() === 0) {
+      throw new Error('Nothing to export yet: there is no tag.');
     }
+    const total = this.options.tags.taggedFileCount();
     const controller = new AbortController();
     const exporting = this.run(destination, appVersion, total, controller.signal);
     this.running = {
@@ -207,11 +216,15 @@ export class TagExporter {
     this.file = file;
     this.report({ step: 'exporting', done: 0, total });
     try {
-      const { files, missing, leftOut } = await this.write(file, appVersion, total, signal);
-      const tags = this.options.tags.count();
+      const { files, missing, tags, definitions, leftOut } = await this.write(
+        file,
+        appVersion,
+        total,
+        signal,
+      );
       await this.save(file, destination, signal);
       this.options.settings.recordTagExport({ at: Date.now(), path: destination, files });
-      return { path: destination, files, missing, tags, leftOut };
+      return { path: destination, files, missing, tags, definitions, leftOut };
     } finally {
       await rm(file, { force: true }).catch((error: unknown) => {
         log.warn(`Cannot delete ${file}:`, errorMessage(error));
@@ -274,8 +287,8 @@ export class TagExporter {
       throw new Error(TOO_LARGE);
     }
     log.info(
-      `Exported ${written.files} tagged files in ${Math.round(performance.now() - started)} ms ` +
-        `(${written.read} fingerprints read)`,
+      `Exported ${written.files} tagged files and ${written.definitions} tags made on purpose in ` +
+        `${Math.round(performance.now() - started)} ms (${written.read} fingerprints read)`,
     );
     if (written.leftOut > 0) {
       log.warn(
@@ -287,8 +300,8 @@ export class TagExporter {
   }
 
   /**
-   * Writes the lines of the export, `header` listing `roots` first, and stops once past
-   * `maxBytes`: such an export is refused.
+   * Writes the lines of the export: `header` listing `roots`, the tag lines, the file lines, and
+   * the end line. Stops once past `maxBytes`: such an export is refused.
    */
   private async writeLines(
     handle: FileHandle,
@@ -300,9 +313,22 @@ export class TagExporter {
     const { files, tags } = this.options;
     const rootIndex = new Map(roots.map((root, index) => [root.id, index]));
     let bytes = await writeText(handle, header);
+    // The names of the tags written, each once: no two tags share a name.
+    const written = new Set<string>();
+    const definitions = tags.definitions();
+    for (let start = 0; start < definitions.length && bytes <= this.maxBytes; start += PAGE_SIZE) {
+      let text = '';
+      for (const definition of definitions.slice(start, start + PAGE_SIZE)) {
+        text += tagLine(definition);
+        written.add(definition.name);
+      }
+      bytes += await writeText(handle, text);
+      await yieldNow();
+      signal.throwIfAborted();
+    }
     let count = 0;
     let missing = 0;
-    // The names of the tags left out of a file, each once: no two tags share a name.
+    // The names of the tags left out of a file, each once.
     const leftOut = new Set<string>();
     let read = 0;
     // Keyset by id: a file renamed or moved meanwhile keeps its place, so it is written once.
@@ -333,6 +359,9 @@ export class TagExporter {
           if (row.missing) {
             missing++;
           }
+          for (const name of held) {
+            written.add(name);
+          }
         }
       }
       bytes += await writeText(handle, text);
@@ -341,8 +370,16 @@ export class TagExporter {
       signal.throwIfAborted();
       page = files.taggedPage((page.at(-1) as TaggedFileRow).id, PAGE_SIZE);
     }
-    bytes += await writeText(handle, endLine(count));
-    return { files: count, missing, leftOut: leftOut.size, read, bytes };
+    bytes += await writeText(handle, endLine(count, definitions.length));
+    return {
+      files: count,
+      missing,
+      tags: written.size,
+      definitions: definitions.length,
+      leftOut: leftOut.size,
+      read,
+      bytes,
+    };
   }
 
   /**

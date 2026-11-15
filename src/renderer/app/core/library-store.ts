@@ -1,6 +1,7 @@
 import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
 import { createLogger } from '@shared/log';
 import type { FileSummary, IndexStatus, SearchRequest, SearchResult } from '@shared/model';
+import { holdsTagOrText } from '../browser/query-terms';
 import { DESKTOP, ipcErrorMessage } from './desktop';
 import { PreferencesStore } from './preferences-store';
 import { WorkerClient } from './worker-client';
@@ -79,6 +80,14 @@ export class LibraryStore {
     });
     this.worker.on('mediaChanged', ({ ids }) => {
       this.forget(ids);
+    });
+    // Adding France above Paris makes `tag:France` find the files tagged Paris, though no file
+    // changed. Other searches find the same files: they are not run again for nothing.
+    this.worker.on('tagDefinitionsChanged', () => {
+      const query = this.query();
+      if (holdsTagOrText(query)) {
+        this.search({ query, sort: this.preferences.sort() });
+      }
     });
   }
 

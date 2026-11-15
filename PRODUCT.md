@@ -84,16 +84,20 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   One Check for updates covers ffmpeg and ffprobe, which come with the same FFmpeg release: it asks
   ffmpeg.org for its latest release and links to its download page when that is newer. SG Tag
   contacts no website otherwise. A tool not found gets a link to install FFmpeg.
-- Tags export and import: a tags export lists every tagged file (missing and offline ones included)
-  with its tags, except those past 1,000 on one file, which it leaves out and counts. It holds up to
-  256 MiB (about 670,000 tagged files) and 10,000 library folders (tens at the longest paths), and
-  Export tags… refuses a larger one rather than save a file Import tags… would refuse. Importing it
-  only adds tags, finds files by their content even if they were renamed, moved, or their library
-  folder has another path, and shows what it will add before writing anything. Tags exports are file
-  version 2: one made by an earlier version of SG Tag (version 1) can no longer be imported. A
-  library last opened by such a version (2026.10.0-alpha.3 or earlier) loses its tags the first time
-  a later version opens it, and those versions can no longer use it: only a copy of the data folder
-  made beforehand keeps its tags.
+- Tags export and import: a tags export describes every tag made or edited on purpose, with its
+  aliases and parent tags, whether or not a file has it, and lists every tagged file (missing and
+  offline ones included) with its tags, except those past 1,000 on one file, which it leaves out and
+  counts. It can be made as soon as the library has a tag. Importing it adds the tags it describes,
+  the aliases and parent tags they lack, and lists what it leaves out and why (an alias another tag
+  has, a parent tag that would make a loop, the limits of 100 aliases and 100 parent tags). It
+  holds up to 256 MiB (about 670,000 tagged files) and 10,000 library folders (tens at the longest
+  paths), and Export tags… refuses a larger one rather than save a file Import tags… would refuse.
+  Importing it only adds tags, finds files by their content even if they were renamed, moved, or
+  their library folder has another path, and shows what it will add before writing anything. Tags
+  exports are file version 2: one made by an earlier version of SG Tag (version 1) can no longer be
+  imported. A library last opened by such a version (2026.10.0-alpha.3 or earlier) loses its tags
+  the first time a later version opens it, and those versions can no longer use it: only a copy of
+  the data folder made beforehand keeps its tags.
 - Terminology: _library folders_ (the roots the user adds), _data folder_, _tags_, _tags export_,
   _selection_, _details panel_, _missing_ and _offline_ files, _indexing_.
 - Heavy work (indexing, watching, thumbnails, database) runs in a separate indexer process, never

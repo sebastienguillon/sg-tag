@@ -8,12 +8,14 @@ import {
   ElementRef,
   inject,
   input,
+  LOCALE_ID,
   untracked,
   viewChild,
 } from '@angular/core';
 import { TagsStore } from '../../core/tags-store';
 import { Icon } from '../../ui/icon/icon';
 import { TagImportPreview } from './tag-import-preview';
+import { importAdditions } from './tag-import-words';
 import type { ImportState } from './tag-transfer-store';
 import { TagTransferStore } from './tag-transfer-store';
 
@@ -32,6 +34,7 @@ export class TagTransfer {
   private readonly tagsStore = inject(TagsStore);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly document = inject(DOCUMENT);
+  private readonly locale = inject(LOCALE_ID);
 
   readonly dataDir = input.required<string | null>();
   /** Tagged files in the library; `null` until known. */
@@ -43,6 +46,33 @@ export class TagTransfer {
   private readonly preview = viewChild(TagImportPreview);
 
   protected readonly tagCount = computed(() => this.tagsStore.tags().length);
+  /**
+   * There is no tag to export, as far as known. A tag made on purpose is exported without a file,
+   * and a tagged file has a tag even before the tags are listed.
+   */
+  protected readonly noTag = computed(
+    () => this.taggedFiles() === 0 && this.tagsStore.loaded() && this.tagCount() === 0,
+  );
+  /** What the import that ended added, as a sentence; empty when it added nothing. */
+  protected readonly added = computed(() => {
+    const state = this.store.importState();
+    if (state.step !== 'done') {
+      return '';
+    }
+    const { assignments, files, newTags, definitions } = state.result;
+    const text = importAdditions(
+      {
+        assignments,
+        files,
+        newTags: definitions.created + newTags,
+        aliases: definitions.aliases,
+        links: definitions.links,
+      },
+      'past',
+      this.locale,
+    );
+    return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+  });
   /** Ties Export tags… to the reason it cannot export. */
   protected readonly hintId = `export-hint-${nextId++}`;
 
@@ -72,7 +102,7 @@ export class TagTransfer {
   }
 
   protected export(): void {
-    if (this.taggedFiles() !== 0) {
+    if (!this.noTag()) {
       void this.store.export();
     }
   }

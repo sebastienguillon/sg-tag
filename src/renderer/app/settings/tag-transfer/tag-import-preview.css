@@ -65,6 +65,12 @@ summary {
   user-select: text;
 }
 
+/* Names of tags, not paths: in the font they are shown in everywhere else. */
+.names {
+  font-family: var(--font);
+  font-size: 12px;
+}
+
 /* Where a moved file is now, under where it was: long paths stay readable. */
 .current {
   display: block;
