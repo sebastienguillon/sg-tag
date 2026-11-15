@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { crawl, statFiles } from '../indexer/crawler';
 import { Reconciler } from '../indexer/reconciler';
 import type { RootRecord } from '../library/roots-repository';
+import { renameOver } from '../testing/rename-over';
 import type { TestLibrary } from '../testing/test-library';
 import { createTestLibrary } from '../testing/test-library';
 import { DuplicateFinder } from './duplicate-finder';
@@ -105,7 +106,7 @@ describe('TrashGuard', () => {
     const again = idOf(file('a.jpg'));
     library.tags.addToFiles([again], ['trip']);
     await guard.prepare(again);
-    await rename(file('other.jpg'), file('a.jpg'));
+    await renameOver(file('other.jpg'), file('a.jpg'));
     expect(await guard.settle(again, false)).toBe(false);
     expect(tagsOf(b)).toEqual(['trip']);
   });
