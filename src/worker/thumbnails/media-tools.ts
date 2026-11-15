@@ -1,5 +1,10 @@
+import type { MediaToolInfo } from '@shared/model';
+import { execFile } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 export interface MediaTools {
   readonly ffmpeg: string | null;
@@ -22,6 +27,34 @@ export function locateMediaTools(resourcesDir: string | null): MediaTools {
     ...WELL_KNOWN_DIRS,
   ].filter((dir): dir is string => dir !== undefined && dir !== '');
   return { ffmpeg: find('ffmpeg', dirs), ffprobe: find('ffprobe', dirs) };
+}
+
+/** A tool found by `locateMediaTools`, with the version it reports now. */
+export async function describeMediaTool(
+  file: string,
+  resourcesDir: string | null,
+): Promise<MediaToolInfo> {
+  let version: string | null = null;
+  try {
+    const { stdout } = await execFileAsync(file, ['-version'], {
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    });
+    version = parseToolVersion(stdout);
+  } catch {
+    // Removed or broken since it was found: no version to show.
+  }
+  return {
+    path: file,
+    version,
+    bundled: resourcesDir !== null && path.dirname(file) === path.join(resourcesDir, 'bin'),
+  };
+}
+
+/** `ffmpeg version 7.1.1 Copyright (c) 2000-2025 the FFmpeg developers` → `7.1.1`. */
+export function parseToolVersion(output: string): string | null {
+  return /^\S+ version (\S+)/.exec(output)?.[1] ?? null;
 }
 
 function find(name: string, dirs: readonly string[]): string | null {

@@ -22,7 +22,7 @@ import { SearchService } from './search/search-service';
 import { TagExporter } from './tag-transfer/tag-exporter';
 import { TagImporter } from './tag-transfer/tag-importer';
 import type { MediaTools } from './thumbnails/media-tools';
-import { locateMediaTools } from './thumbnails/media-tools';
+import { describeMediaTool, locateMediaTools } from './thumbnails/media-tools';
 import { Thumbnailer } from './thumbnails/thumbnailer';
 
 const log = createLogger('library');
@@ -383,12 +383,19 @@ export class Library {
     };
   }
 
-  private diagnostics(): Diagnostics {
+  private async diagnostics(): Promise<Diagnostics> {
     const sqlite = this.db.prepare<[], string>('SELECT sqlite_version()').pluck().get() ?? '?';
+    // Asked again each time: an update installed in place shows without restarting.
+    const describe = (tool: string | null) =>
+      tool === null ? null : describeMediaTool(tool, this.config.resourcesDir);
+    const [ffmpeg, ffprobe] = await Promise.all([
+      describe(this.tools.ffmpeg),
+      describe(this.tools.ffprobe),
+    ]);
     return {
       appVersion: this.config.appVersion,
-      ffmpeg: this.tools.ffmpeg,
-      ffprobe: this.tools.ffprobe,
+      ffmpeg,
+      ffprobe,
       sqlite,
       dataDir: this.config.dataDir,
     };
