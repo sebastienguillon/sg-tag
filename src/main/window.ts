@@ -1,4 +1,5 @@
 import { BrowserWindow, nativeTheme } from 'electron';
+import { handleZoom, trafficLightPosition } from './zoom';
 
 export interface MainWindowOptions {
   readonly url: string;
@@ -19,7 +20,7 @@ export function createMainWindow({ url, preload }: MainWindowOptions): BrowserWi
     backgroundColor: nativeTheme.shouldUseDarkColors ? BACKGROUND.dark : BACKGROUND.light,
     // On macOS the toolbar doubles as the title bar.
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 18 } }
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: trafficLightPosition(1) }
       : { autoHideMenuBar: true }),
     webPreferences: {
       preload,
@@ -33,6 +34,8 @@ export function createMainWindow({ url, preload }: MainWindowOptions): BrowserWi
   window.once('ready-to-show', () => {
     window.show();
   });
+
+  handleZoom(window);
 
   const { origin } = new URL(url);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
