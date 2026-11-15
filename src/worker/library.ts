@@ -104,6 +104,20 @@ export class Library {
     addTagAlias: (id, alias) => this.editTag(id, () => this.tags.addAlias(id, alias)),
     removeTagAlias: (id, alias) => this.editTag(id, () => this.tags.removeAlias(id, alias)),
     addTagParent: (id, parentName) => this.editTag(id, () => this.tags.addParent(id, parentName)),
+    // The tag answered does not change: the child tag does, which may be new. A link was added when
+    // the tag has one more child tag.
+    addTagChild: (id, childName) => {
+      if (this.transferringTags) {
+        return BUSY;
+      }
+      const before = this.tags.childCount(id);
+      const result = this.tags.addChild(id, childName);
+      if (result.ok && this.tags.childCount(id) !== before) {
+        this.broadcast('tagsChanged', null);
+        this.broadcast('tagDefinitionsChanged', null);
+      }
+      return result;
+    },
     removeTagParent: (id, parentId) => this.editTag(id, () => this.tags.removeParent(id, parentId)),
     deleteTag: (id) => {
       if (this.transferringTags) {
@@ -119,6 +133,7 @@ export class Library {
     },
     mergeTags: (fromId, intoId) => this.editTag(intoId, () => this.tags.mergeTags(fromId, intoId)),
     getTagDetails: (id) => this.tags.details(id),
+    getMergePreview: (fromId, intoId) => this.tags.mergePreview(fromId, intoId),
     findDuplicates: () => this.duplicates.checkLibrary(),
     shareTagsWithCopies: (fileId) => {
       const group = this.files.contentGroup(fileId).map((copy) => copy.id);

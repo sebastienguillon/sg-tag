@@ -95,6 +95,20 @@ export interface TagDetails {
   readonly forgottenFiles: number;
 }
 
+/** What merging one tag into another would do, read before asking to confirm it. */
+export interface TagMergePreview {
+  /** The tag that would go: its files, parent tags, child tags, name and aliases move. */
+  readonly from: TagRef;
+  /** The tag that would stay, and get them. */
+  readonly into: TagRef;
+  /** Files, missing ones included, that carry `from` and not `into`: they would gain `into`. */
+  readonly filesMoved: number;
+  /** Files that carry both: they keep `into`, once. */
+  readonly filesWithBoth: number;
+  /** Why the merge would be refused (`loop` or `limit`); `null` when it would be made. */
+  readonly refusal: TagEditError | null;
+}
+
 /** What became of one name given to `addTags`. */
 export type TagAddOutcome =
   /**

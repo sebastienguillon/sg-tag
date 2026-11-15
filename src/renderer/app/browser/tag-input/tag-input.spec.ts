@@ -5,10 +5,15 @@ import { WorkerClient } from '../../core/worker-client';
 import { FakeWorkerClient, settle } from '../../testing/fake-worker-client';
 import { TagInput } from './tag-input';
 
-const tag = (id: number, name: string, fileCount: number): Tag => ({
+const tag = (
+  id: number,
+  name: string,
+  fileCount: number,
+  aliases: readonly string[] = [],
+): Tag => ({
   id,
   name,
-  aliases: [],
+  aliases,
   parentIds: [],
   fileCount,
 });
@@ -95,7 +100,7 @@ describe('TagInput', () => {
     await type('ja');
     expect(input.getAttribute('aria-expanded')).toBe('true');
     expect(input.getAttribute('aria-controls')).toBe(host.querySelector('[role="listbox"]')?.id);
-    expect(suggested()).toEqual(['jazz', 'Japan', 'ninja']);
+    expect(suggested()).toEqual(['jazz', 'Japan', 'ninja', 'ja: new tag']);
     expect([...host.querySelectorAll('.count')].map((count) => count.textContent)).toEqual([
       '9',
       '5',
@@ -103,7 +108,13 @@ describe('TagInput', () => {
     ]);
     expect(highlighted()).toBeNull();
 
+    // No tag holds it: only what is typed is offered, as a new tag.
     await type('xyz');
+    expect(suggested()).toEqual(['xyz: new tag']);
+    expect(host.querySelector('.count')).toBeNull();
+
+    // Nor that, for a text that cannot be a name: nothing is left to offer.
+    await type('x,yz');
     expect(input.getAttribute('aria-expanded')).toBe('false');
     expect(host.querySelector('[role="listbox"]')).toBeNull();
   });
@@ -118,26 +129,29 @@ describe('TagInput', () => {
     await press('ArrowDown');
     expect(highlighted()).toBe('ninja');
     await press('ArrowDown');
+    expect(highlighted()).toBe('ja: new tag');
+    await press('ArrowDown');
     expect(highlighted()).toBe('jazz');
 
     const up = await press('ArrowUp');
     expect(up.defaultPrevented).toBe(true);
-    expect(highlighted()).toBe('ninja');
+    expect(highlighted()).toBe('ja: new tag');
     await press('ArrowUp');
-    expect(highlighted()).toBe('Japan');
+    expect(highlighted()).toBe('ninja');
   });
 
   it('starts from the last suggestion on ↑, and from none again once the text changes', async () => {
     await type('ja');
     await press('ArrowUp');
-    expect(highlighted()).toBe('ninja');
+    expect(highlighted()).toBe('ja: new tag');
 
     await type('jap');
-    expect(suggested()).toEqual(['Japan']);
+    expect(suggested()).toEqual(['Japan', 'jap: new tag']);
     expect(highlighted()).toBeNull();
   });
 
   it('leaves the arrows to the text when nothing is suggested', async () => {
+    fixture.componentRef.setInput('allowNew', false);
     await type('xyz');
     expect((await press('ArrowDown')).defaultPrevented).toBe(false);
     expect((await press('ArrowUp')).defaultPrevented).toBe(false);
@@ -156,7 +170,7 @@ describe('TagInput', () => {
 
   it('adds what is typed on Enter when no suggestion is highlighted, without the spaces around it', async () => {
     await type('  jap ');
-    expect(suggested()).toEqual(['Japan']);
+    expect(suggested()).toEqual(['Japan', 'jap: new tag']);
     await press('Enter');
     expect(added).toEqual(['jap']);
     expect(input.value).toBe('');
@@ -307,7 +321,7 @@ describe('TagInput', () => {
     worker.respond('listTags', () => [...TAGS, tag(5, 'java', 20)]);
     worker.emit('tagsChanged', null);
     await render();
-    expect(suggested()).toEqual(['java', 'jazz', 'Japan', 'ninja']);
+    expect(suggested()).toEqual(['java', 'jazz', 'Japan', 'ninja', 'ja: new tag']);
     expect(highlighted()).toBe('Japan');
 
     // The tag chosen, not the letters typed.
@@ -323,7 +337,7 @@ describe('TagInput', () => {
     // Given meanwhile to every selected file.
     fixture.componentRef.setInput('exclude', new Set([2]));
     await render();
-    expect(suggested()).toEqual(['Japan', 'ninja']);
+    expect(suggested()).toEqual(['Japan', 'ninja', 'ja: new tag']);
     expect(highlighted()).toBeNull();
 
     await press('Enter');
@@ -337,7 +351,7 @@ describe('TagInput', () => {
     expect(highlighted()).toBe('Japan');
 
     await type('jap');
-    expect(suggested()).toEqual(['Japan']);
+    expect(suggested()).toEqual(['Japan', 'jap: new tag']);
     expect(highlighted()).toBeNull();
     await press('Enter');
     expect(added).toEqual(['jap']);
@@ -386,7 +400,7 @@ describe('TagInput', () => {
   it('leaves out of the suggestions the tags whose id it is given', async () => {
     fixture.componentRef.setInput('exclude', new Set([2]));
     await type('ja');
-    expect(suggested()).toEqual(['Japan', 'ninja']);
+    expect(suggested()).toEqual(['Japan', 'ninja', 'ja: new tag']);
 
     // Left out, a tag can still be typed in full and added.
     await type('jazz');
@@ -418,6 +432,182 @@ describe('TagInput', () => {
     fixture.componentInstance.focus();
     await render();
     expect(document.activeElement).toBe(input);
+    expect(suggested()).toEqual(['jazz', 'Japan', 'ninja', 'ja: new tag']);
+  });
+
+  it('suggests a tag by an alias, shown with the name of the tag it adds', async () => {
+    worker.respond('listTags', () => [...TAGS, tag(5, 'Paris', 7, ['Paname'])]);
+    worker.emit('tagsChanged', null);
+    await type('pan');
+    expect(suggested()).toEqual(['Paname → Paris', 'Japan', 'pan: new tag']);
+
+    await press('ArrowDown');
+    expect(highlighted()).toBe('Paname → Paris');
+    await press('Enter');
+    expect(added).toEqual(['Paris']);
+  });
+
+  it('ends the suggestions with what is typed as a new tag, unless a tag has it as a name or an alias', async () => {
+    worker.respond('listTags', () => [...TAGS, tag(5, 'Paris', 7, ['Paname'])]);
+    worker.emit('tagsChanged', null);
+    await type('  pari ');
+    expect(suggested()).toEqual(['Paris', 'pari: new tag']);
+    await press('ArrowUp');
+    expect(highlighted()).toBe('pari: new tag');
+    await press('Enter');
+    expect(added).toEqual(['pari']);
+
+    // A tag has it as its name or an alias, in another letter case: there is nothing new to make.
+    await type('PARIS');
+    expect(suggested()).toEqual(['Paris']);
+    await type('paname');
+    expect(suggested()).toEqual(['Paname → Paris']);
+    // Nor is a text that cannot be a name offered as one.
+    await type('pari, s');
+    expect(suggested()).toEqual([]);
+  });
+
+  it('adds the tag that what is typed names: by an alias, or without its accents when only one tag matches', async () => {
+    worker.respond('listTags', () => [
+      ...TAGS,
+      tag(5, 'Paris', 7, ['Paname']),
+      tag(6, 'Égypte', 2),
+    ]);
+    worker.emit('tagsChanged', null);
+    await type('PANAME');
+    await press('Enter');
+    await type('Egypte');
+    // Typed without its accents, the text can also be a tag of its own: the last line makes it.
+    expect(suggested()).toEqual(['Égypte', 'Egypte: new tag']);
+    expect(highlighted()).toBeNull();
+    await press(',');
+    expect(added).toEqual(['Paris', 'Égypte']);
+  });
+
+  it('adds what is typed when two tags match it without their accents', async () => {
+    worker.respond('listTags', () => [...TAGS, tag(5, 'côte', 3), tag(6, 'côté', 1)]);
+    worker.emit('tagsChanged', null);
+    await type('cote');
+    await press('Enter');
+    expect(added).toEqual(['cote']);
+  });
+
+  it('offers to edit a tag already added, in place of adding it again', async () => {
+    const edited: number[] = [];
+    fixture.componentInstance.edit.subscribe((id) => {
+      edited.push(id);
+    });
+    fixture.componentRef.setInput('added', new Set([1]));
+    await type('ja');
+    expect(suggested()).toEqual([
+      'jazz',
+      'Japan: already added — Enter to edit',
+      'ninja',
+      'ja: new tag',
+    ]);
+    // No file would gain it: no count.
+    expect([...host.querySelectorAll('.count')].map((count) => count.textContent)).toEqual([
+      '9',
+      '1',
+    ]);
+
+    await press('ArrowDown');
+    await press('ArrowDown');
+    expect(highlighted()).toBe('Japan: already added — Enter to edit');
+    await press('Enter');
+    expect(edited).toEqual([1]);
+    expect(added).toEqual([]);
+    expect(input.value).toBe('');
+
+    // Clicked, the same.
+    await type('jap');
+    host.querySelector<HTMLButtonElement>('[role="option"] button')?.click();
+    await render();
+    expect(edited).toEqual([1, 1]);
+    expect(added).toEqual([]);
+  });
+
+  it('shows the tags that cannot be chosen, with why, and says it when one is', async () => {
+    fixture.componentRef.setInput(
+      'disabled',
+      new Map([
+        [1, 'is this tag'],
+        [3, 'is below Japan'],
+      ]),
+    );
+    await type('ja');
+    expect(suggested()).toEqual([
+      'jazz',
+      'Japan: is this tag',
+      'ninja: is below Japan',
+      'ja: new tag',
+    ]);
+    expect(
+      [...host.querySelectorAll('[role="option"][aria-disabled="true"] .name')].map(
+        (name) => name.textContent,
+      ),
+    ).toEqual(['Japan: is this tag', 'ninja: is below Japan']);
+
+    // Highlighted, to be heard; chosen, it is not added, and the field says why.
+    await press('ArrowDown');
+    await press('ArrowDown');
+    expect(highlighted()).toBe('Japan: is this tag');
+    await press('Enter');
+    expect(problem()).toBe('Japan is this tag.');
+    expect(input.value).toBe('ja');
+
+    // Typed in full.
+    await type('NINJA');
+    await press('Enter');
+    expect(problem()).toBe('ninja is below Japan.');
+
+    // Clicked.
+    await type('ninj');
+    host.querySelector<HTMLButtonElement>('[role="option"] button')?.click();
+    await render();
+    expect(problem()).toBe('ninja is below Japan.');
+    expect(added).toEqual([]);
+  });
+
+  it('makes no new tag when only an existing tag can be chosen', async () => {
+    fixture.componentRef.setInput('allowNew', false);
+    await type('ja');
     expect(suggested()).toEqual(['jazz', 'Japan', 'ninja']);
+
+    await type('jap');
+    await press('Enter');
+    expect(problem()).toBe('No tag is named “jap”.');
+    await type('jap"');
+    await press('Enter');
+    expect(problem()).toBe('A tag cannot contain a double quote.');
+    expect(added).toEqual([]);
+
+    await type('japan');
+    await press('Enter');
+    expect(added).toEqual(['Japan']);
+  });
+
+  it('takes its label and placeholder from its host', async () => {
+    fixture.componentRef.setInput('label', 'Add a parent tag');
+    await render();
+    expect(input.placeholder).toBe('Add a parent tag');
+    expect(input.getAttribute('aria-label')).toBe('Add a parent tag');
+  });
+
+  it('leaves ⌘/Ctrl-comma to the shortcut that opens the settings: nothing is added', async () => {
+    await type('jazz');
+    for (const modifier of [{ metaKey: true }, { ctrlKey: true }]) {
+      const event = new KeyboardEvent('keydown', {
+        key: ',',
+        bubbles: true,
+        cancelable: true,
+        ...modifier,
+      });
+      input.dispatchEvent(event);
+      await render();
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(added).toEqual([]);
+    expect(input.value).toBe('jazz');
   });
 });

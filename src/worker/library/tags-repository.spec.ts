@@ -1898,3 +1898,71 @@ describe('TagsRepository.applyDefinitions', () => {
     expect(tags.newlyFound(paris, france)).toBe(0);
   });
 });
+
+describe('TagsRepository.addChild', () => {
+  it('puts a tag below another by its name or an alias, making it when no tag has the name', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    const france = addTag('France');
+    addTag('Paris', { aliases: ['Paname'] });
+
+    expect(editedTag(tags.addChild(france, 'paname'))).toMatchObject({ name: 'France' });
+    expect(editedTag(tags.addChild(france, 'Lyon'))).toMatchObject({ name: 'France' });
+    expect(tags.details(france)?.children.map((tag) => tag.name)).toEqual(['Lyon', 'Paris']);
+    expect(tags.childCount(france)).toBe(2);
+    // Made on purpose: it stays without a file.
+    expect(tags.cleanup()).toBe(0);
+    // Already below it: nothing changes.
+    expect(editedTag(tags.addChild(france, 'Paris'))).toMatchObject({ name: 'France' });
+    expect(tags.childCount(france)).toBe(2);
+  });
+
+  it('refuses the tag itself, a tag above it, and a name that cannot be one', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    const paris = addTag('Paris', { parents: ['France'] });
+    const france = idOf(tags, 'France');
+
+    expect(errorOf(tags.addChild(france, 'FRANCE'))).toMatchObject({ kind: 'loop' });
+    expect(errorOf(tags.addChild(paris, 'France'))).toMatchObject({ kind: 'loop' });
+    expect(errorOf(tags.addChild(france, 'a,b'))).toEqual({ kind: 'invalid', problem: 'comma' });
+    expect(errorOf(tags.addChild(9_999, 'Lyon'))).toEqual({ kind: 'gone' });
+    expect(tags.resolve(['Lyon'])).toEqual([null]);
+  });
+});
+
+describe('TagsRepository.mergePreview', () => {
+  it('counts the files that would gain the tag kept and those that have both, writing nothing', () => {
+    const { tags, addFile, db } = createCheckedLibrary();
+    const [a, b, gone] = [
+      addFile('a.jpg'),
+      addFile('b.jpg'),
+      addFile('gone.jpg', { missingSince: 1 }),
+    ];
+    tags.addToFiles([a, b, gone], ['Paname']);
+    tags.addToFiles([b], ['Paris']);
+    const before = storedRows(db);
+
+    expect(tags.mergePreview(idOf(tags, 'Paname'), idOf(tags, 'Paris'))).toEqual({
+      from: { id: idOf(tags, 'Paname'), name: 'Paname' },
+      into: { id: idOf(tags, 'Paris'), name: 'Paris' },
+      // Missing files are counted: they carry the tag all the same.
+      filesMoved: 2,
+      filesWithBoth: 1,
+      refusal: null,
+    });
+    expect(storedRows(db)).toEqual(before);
+  });
+
+  it('says why a merge would be refused, as the merge would', () => {
+    const { tags, addTag } = createCheckedLibrary();
+    addTag('Paris', { parents: ['France'] });
+    addTag('France', { parents: ['Europe'] });
+    const [paris, europe] = [idOf(tags, 'Paris'), idOf(tags, 'Europe')];
+
+    const preview = tags.mergePreview(paris, europe);
+    expect(preview?.refusal).toMatchObject({ kind: 'loop' });
+    expect(errorOf(tags.mergeTags(paris, europe))).toEqual(preview?.refusal);
+    // The same tag twice, or a tag gone: nothing to preview.
+    expect(tags.mergePreview(paris, paris)).toBeNull();
+    expect(tags.mergePreview(paris, 9_999)).toBeNull();
+  });
+});

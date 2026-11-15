@@ -134,6 +134,7 @@ h3 {
   font-size: 11px;
 }
 
+.chip-edit,
 .chip-remove {
   display: inline-flex;
   padding: 4px 8px 4px 2px;
@@ -141,6 +142,11 @@ h3 {
   opacity: 0.6;
 }
 
+.chip-edit {
+  padding-right: 4px;
+}
+
+.chip-edit:hover,
 .chip-remove:hover {
   opacity: 1;
 }
@@ -148,6 +154,31 @@ h3 {
 .no-tags {
   color: var(--text-faint);
   font-size: 12px;
+}
+
+/* Why the selected files are found by a search for a tag they do not carry. */
+.found-under {
+  margin: -4px 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.editor {
+  margin-top: 10px;
 }
 
 .meta {

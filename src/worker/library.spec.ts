@@ -140,6 +140,7 @@ describe('Library', () => {
       removeTagAlias: () => handlers.removeTagAlias(paris.id, 'Paname'),
       addTagParent: () => handlers.addTagParent(paris.id, 'Europe'),
       removeTagParent: () => handlers.removeTagParent(paris.id, europe.id),
+      addTagChild: () => handlers.addTagChild(europe.id, 'Lyon'),
       mergeTags: () => handlers.mergeTags(lutetia.id, paris.id),
       deleteTag: () => handlers.deleteTag(paris.id),
     };
@@ -451,6 +452,29 @@ describe('Library', () => {
       aliases: [],
     });
     expect(sent()).toEqual(DEFINITIONS_CHANGED);
+  });
+
+  it('tells renderers when a tag gets a child tag, made on the way or not, and not when it had it', async () => {
+    const { handlers } = library;
+    const france = editedTag(await handlers.createTag('France'));
+    editedTag(await handlers.createTag('Paris'));
+    const sent = listen();
+
+    expect(editedTag(await handlers.addTagChild(france.id, 'paris'))).toMatchObject({
+      id: france.id,
+    });
+    expect(sent()).toEqual(DEFINITIONS_CHANGED);
+    expect(editedTag(await handlers.addTagChild(france.id, 'Lyon'))).toMatchObject({
+      id: france.id,
+    });
+    expect(sent()).toEqual(DEFINITIONS_CHANGED);
+    expect(editedTag(await handlers.addTagChild(france.id, 'Paris'))).toMatchObject({
+      id: france.id,
+    });
+    expect(sent()).toEqual([]);
+    expect(await handlers.addTagChild(france.id, 'France')).toMatchObject({ ok: false });
+    expect(sent()).toEqual([]);
+    expect(await handlers.getMergePreview(france.id, france.id)).toBeNull();
   });
 
   it('tells renderers once when a parent tag is made on the way', async () => {

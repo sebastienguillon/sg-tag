@@ -20,7 +20,8 @@ export type IconName =
   | 'sort-asc'
   | 'panel'
   | 'play'
-  | 'copy';
+  | 'copy'
+  | 'pencil';
 
 /** A symbol from the sprite rendered once by `IconSprite`; sized by `font-size`, coloured by `color`. */
 @Component({

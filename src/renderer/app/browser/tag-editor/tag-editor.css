@@ -1,0 +1,178 @@
+:host {
+  display: block;
+}
+
+.editor {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-right: -6px;
+}
+
+.header .icon-button {
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+}
+
+.title,
+h5 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+h5 {
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.name {
+  display: grid;
+  gap: 4px;
+}
+
+.label {
+  color: var(--text-muted);
+}
+
+.text-field,
+.field {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.text-field:focus,
+.field:focus-within {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-halo);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.keep {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.counts {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+}
+
+.chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.chip-label {
+  padding: 3px 4px 3px 10px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.chip-remove {
+  display: inline-flex;
+  padding: 4px 8px 4px 2px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.chip-remove:hover {
+  opacity: 1;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.offer {
+  justify-self: start;
+}
+
+.gone {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.confirm {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+}
+
+.confirm p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.confirm .actions {
+  margin-top: 0;
+}
+
+/* May quote what was typed, which can be one long word. */
+.error {
+  margin: 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}

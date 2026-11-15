@@ -1,34 +1,43 @@
 import { TestBed } from '@angular/core/testing';
 import type { Tag } from '@shared/model';
 import { FakeWorkerClient, settle } from '../testing/fake-worker-client';
+import type { TagSuggestion } from './tags-store';
 import { TagsStore } from './tags-store';
 import { WorkerClient } from './worker-client';
 
-const tag = (id: number, name: string, fileCount = 1): Tag => ({
+const tag = (
+  id: number,
+  name: string,
+  fileCount = 1,
+  more: Partial<Pick<Tag, 'aliases' | 'parentIds'>> = {},
+): Tag => ({
   id,
   name,
-  aliases: [],
-  parentIds: [],
+  aliases: more.aliases ?? [],
+  parentIds: more.parentIds ?? [],
   fileCount,
 });
 
+let worker: FakeWorkerClient;
+
+/** The store of a library that holds `tags`, once it listed them. */
+const storeOf = async (tags: readonly Tag[]): Promise<TagsStore> => {
+  worker.respond('listTags', () => tags);
+  const store = TestBed.inject(TagsStore);
+  TestBed.tick();
+  await settle();
+  return store;
+};
+
+beforeEach(() => {
+  worker = new FakeWorkerClient();
+  TestBed.configureTestingModule({ providers: [{ provide: WorkerClient, useValue: worker }] });
+});
+
 describe('TagsStore.suggest', () => {
-  let worker: FakeWorkerClient;
-
-  /** The store of a library that holds `tags`, once it listed them. */
-  const storeOf = async (tags: readonly Tag[]): Promise<TagsStore> => {
-    worker.respond('listTags', () => tags);
-    const store = TestBed.inject(TagsStore);
-    TestBed.tick();
-    await settle();
-    return store;
-  };
-  const names = (tags: readonly Tag[]): string[] => tags.map((each) => each.name);
-
-  beforeEach(() => {
-    worker = new FakeWorkerClient();
-    TestBed.configureTestingModule({ providers: [{ provide: WorkerClient, useValue: worker }] });
-  });
+  /** Each suggestion as the tag input shows it: its name, or the alias it matched and its name. */
+  const names = (suggestions: readonly TagSuggestion[]): string[] =>
+    suggestions.map(({ tag: { name }, alias }) => (alias === null ? name : `${alias} → ${name}`));
 
   it('ranks the name typed, then names starting with the text, then words starting with it, then the rest', async () => {
     const store = await storeOf([
@@ -198,5 +207,116 @@ describe('TagsStore.suggest', () => {
     await settle();
 
     expect(names(store.suggest('ja'))).toEqual(['Japan', 'jazz']);
+  });
+
+  it('matches the aliases of tags as it matches names, and suggests each tag once', async () => {
+    const store = await storeOf([
+      tag(1, 'Paris', 40, { aliases: ['Paname', 'Lutèce'] }),
+      tag(2, 'Parme', 3),
+      tag(3, 'Lyon', 9, { aliases: ['Lugdunum'] }),
+    ]);
+
+    expect(names(store.suggest('pan'))).toEqual(['Paname → Paris']);
+    // Without its accents, as a name.
+    expect(names(store.suggest('LUTE'))).toEqual(['Lutèce → Paris']);
+    expect(names(store.suggest('lu'))).toEqual(['Lutèce → Paris', 'Lugdunum → Lyon']);
+    // Its name matches as well as an alias: the tag comes once, by its name.
+    expect(names(store.suggest('pa'))).toEqual(['Paris', 'Parme']);
+  });
+
+  it('ranks a tag by the name or alias that matches best', async () => {
+    const store = await storeOf([
+      tag(1, 'Lutèce', 1, { aliases: ['Paris'] }),
+      tag(2, 'Parisian', 50),
+      tag(3, 'Champs', 90, { aliases: ['Paris street'] }),
+    ]);
+
+    // The alias that is the text comes before a name that starts with it, however used.
+    expect(names(store.suggest('paris'))).toEqual([
+      'Paris → Lutèce',
+      'Paris street → Champs',
+      'Parisian',
+    ]);
+  });
+
+  it('leaves out a tag by its id, whichever of its names matches', async () => {
+    const store = await storeOf([tag(1, 'Paris', 4, { aliases: ['Paname'] }), tag(2, 'Panama')]);
+
+    expect(names(store.suggest('pan', new Set([1])))).toEqual(['Panama']);
+  });
+});
+
+describe('TagsStore.resolve', () => {
+  it('finds the tag that a text is the name or an alias of, whatever its letter case', async () => {
+    const store = await storeOf([tag(1, 'Paris', 1, { aliases: ['Paname'] }), tag(2, 'Égypte')]);
+
+    expect(store.resolve('paris')?.name).toBe('Paris');
+    expect(store.resolve('  PANAME ')?.name).toBe('Paris');
+    expect(store.resolve('égypte')?.name).toBe('Égypte');
+    expect(store.resolve('Pari')).toBeNull();
+    expect(store.resolve('')).toBeNull();
+  });
+
+  it('finds the one tag that a text typed without its accents is', async () => {
+    const store = await storeOf([tag(1, 'Égypte'), tag(2, 'Noël', 1, { aliases: ['Père Noël'] })]);
+
+    expect(store.resolve('Egypte')?.name).toBe('Égypte');
+    expect(store.resolve('pere noel')?.name).toBe('Noël');
+  });
+
+  it('finds no tag by a text without accents that two tags are', async () => {
+    const store = await storeOf([tag(1, 'côte'), tag(2, 'côté', 1, { aliases: ['coté'] })]);
+
+    expect(store.resolve('cote')).toBeNull();
+    // With its accents, the text is one of them.
+    expect(store.resolve('Côté')?.name).toBe('côté');
+  });
+
+  it('tells whether a text is the name or an alias of a tag, accents counted', async () => {
+    const store = await storeOf([tag(1, 'Égypte', 1, { aliases: ['Kemet'] })]);
+
+    expect(store.isName('égypte')).toBe(true);
+    expect(store.isName(' KEMET ')).toBe(true);
+    expect(store.isName('Egypte')).toBe(false);
+    expect(store.isName('Kem')).toBe(false);
+  });
+});
+
+describe('TagsStore.above and TagsStore.below', () => {
+  /** Europe › France › Île-de-France › Paris, and Lyon below France; Paris is a capital too. */
+  const LIBRARY = [
+    tag(1, 'Capitals'),
+    tag(2, 'Europe'),
+    tag(3, 'France', 1, { parentIds: [2] }),
+    tag(4, 'Île-de-France', 1, { parentIds: [3] }),
+    tag(5, 'Lyon', 1, { parentIds: [3] }),
+    tag(6, 'Paris', 1, { parentIds: [4, 1] }),
+  ];
+  const names = (tags: readonly Tag[]): string[] => tags.map((each) => each.name);
+
+  it('lists the tags above a tag, at any depth: nearest first, then by name', async () => {
+    const store = await storeOf(LIBRARY);
+
+    expect(names(store.above(6))).toEqual(['Capitals', 'Île-de-France', 'France', 'Europe']);
+    expect(store.above(2)).toEqual([]);
+  });
+
+  it('lists the tags below a tag, at any depth: nearest first, then by name', async () => {
+    const store = await storeOf(LIBRARY);
+
+    expect(names(store.below(2))).toEqual(['France', 'Île-de-France', 'Lyon', 'Paris']);
+    expect(names(store.below(1))).toEqual(['Paris']);
+    expect(store.below(6)).toEqual([]);
+  });
+
+  it('puts tags in the order the worker sorts names, those it did not list last', async () => {
+    const store = await storeOf(LIBRARY);
+
+    const refs = [
+      { id: 6, name: 'Paris' },
+      { id: 99, name: 'Aardvark' },
+      { id: 2, name: 'Europe' },
+    ];
+    expect(store.inNameOrder(refs).map((ref) => ref.name)).toEqual(['Europe', 'Paris', 'Aardvark']);
   });
 });

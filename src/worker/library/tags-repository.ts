@@ -9,6 +9,7 @@ import type {
   TagImportKnownAs,
   TagImportLink,
   TagImportSkip,
+  TagMergePreview,
   TagRef,
   TagUsage,
 } from '@shared/model';
@@ -121,6 +122,9 @@ function prepareStatements(db: Db) {
     ),
     parentCount: db.prepare<[number], { count: number }>(
       'SELECT COUNT(*) AS count FROM tag_parents WHERE tag_id = ?',
+    ),
+    childCount: db.prepare<[number], { count: number }>(
+      'SELECT COUNT(*) AS count FROM tag_parents WHERE parent_id = ?',
     ),
     // The parents the tag kept by a merge ends up with: those of both, each once, less the two
     // tags themselves.
@@ -262,6 +266,16 @@ function prepareStatements(db: Db) {
       DELETE FROM tags
       WHERE kept = 0 AND NOT EXISTS (SELECT 1 FROM file_tags ft WHERE ft.tag_id = tags.id)`),
     keptIds: db.prepare<[], { id: number }>('SELECT id FROM tags WHERE kept = 1'),
+    // The files of `@from`, missing ones included: those without `@into`, and those with both.
+    mergedFiles: db.prepare<[{ from: number; into: number }], { moved: number; both: number }>(`
+      SELECT
+        COALESCE(SUM(NOT EXISTS (
+          SELECT 1 FROM file_tags other WHERE other.file_id = ft.file_id AND other.tag_id = @into
+        )), 0) AS moved,
+        COALESCE(SUM(EXISTS (
+          SELECT 1 FROM file_tags other WHERE other.file_id = ft.file_id AND other.tag_id = @into
+        )), 0) AS both
+      FROM file_tags ft WHERE ft.tag_id = @from`),
     isKept: db.prepare<[number], { kept: number }>('SELECT kept FROM tags WHERE id = ?'),
     // Files of `@child` and of the tags below it that `@parent` and the tags below it do not have:
     // those a search for the parent starts to find once `@child` is put below it. Missing files are
@@ -786,18 +800,11 @@ export class TagsRepository {
       if (fromId === intoId) {
         return this.edited(intoId);
       }
-      const loop =
-        this.loop(toRef(into), toRef(from), true) ?? this.loop(toRef(from), toRef(into), true);
-      if (loop) {
-        return refused(loop);
-      }
-      if (this.aliasCount(intoId) + 1 + this.aliasCount(fromId) > MAX_TAG_ALIASES) {
-        return refused({ kind: 'limit', what: 'aliases' });
+      const refusal = this.mergeRefusal(toRef(from), toRef(into));
+      if (refusal) {
+        return refused(refusal);
       }
       const pair = { from: fromId, into: intoId };
-      if ((this.statements.mergedParentCount.get(pair)?.count ?? 0) > MAX_TAG_PARENTS) {
-        return refused({ kind: 'limit', what: 'parents' });
-      }
       // The link between the two goes first: moved, it would make the kept tag its own parent.
       this.statements.unlink.run(fromId, intoId);
       this.statements.unlink.run(intoId, fromId);
@@ -809,6 +816,61 @@ export class TagsRepository {
       this.statements.keep.run(intoId);
       return this.edited(intoId);
     });
+  }
+
+  /**
+   * What `mergeTags(fromId, intoId)` would do, writing nothing: the files that would gain `intoId`,
+   * those that carry both, and why it would be refused. `null` when either tag is gone or they are
+   * the same tag.
+   */
+  mergePreview(fromId: number, intoId: number): TagMergePreview | null {
+    return this.transaction((): TagMergePreview | null => {
+      const from = this.statements.nameOf.get(fromId);
+      const into = this.statements.nameOf.get(intoId);
+      if (!from || !into || fromId === intoId) {
+        return null;
+      }
+      const files = this.statements.mergedFiles.get({ from: fromId, into: intoId });
+      return {
+        from: toRef(from),
+        into: toRef(into),
+        filesMoved: files?.moved ?? 0,
+        filesWithBoth: files?.both ?? 0,
+        refusal: this.mergeRefusal(toRef(from), toRef(into)),
+      };
+    });
+  }
+
+  /**
+   * Puts the tag that `childName` is the name or an alias of below tag `id`, making that tag when
+   * no tag has the name: `addParent` seen from the parent. Answers tag `id`.
+   */
+  addChild(id: number, childName: string): TagEditResult {
+    return this.transaction((): TagEditResult => {
+      const row = this.statements.nameOf.get(id);
+      if (!row) {
+        return refused({ kind: 'gone' });
+      }
+      const check = normalizeTagName(childName);
+      if (!check.ok) {
+        return refused({ kind: 'invalid', problem: check.problem });
+      }
+      const known = this.find(check.name);
+      if (known) {
+        const linked = this.addParent(known.id, row.name);
+        return linked.ok ? this.edited(id) : linked;
+      }
+      // A new tag cannot be above any other: the link can neither loop nor pass a limit.
+      const child = this.insertTag(check.name, 1);
+      this.statements.link.run(child.id, id);
+      this.statements.keep.run(id);
+      return this.edited(id);
+    });
+  }
+
+  /** How many child tags tag `id` has, one step down. */
+  childCount(id: number): number {
+    return this.statements.childCount.get(id)?.count ?? 0;
   }
 
   /** What a tag stands for in the library; `null` when no tag has this id. */
@@ -1008,6 +1070,26 @@ export class TagsRepository {
       .sort(byName)
       .at(0);
     return through ? { kind: 'loop', above, below, through: toRef(through) } : null;
+  }
+
+  /**
+   * Why merging `from` into `into`, two tags, is refused; `null` when it is not. `loop` when,
+   * leaving aside a parent link between the two, one is below the other; `limit` when the kept tag
+   * would have more aliases or parents than a tag may.
+   */
+  private mergeRefusal(from: TagRef, into: TagRef): TagEditError | null {
+    const loop = this.loop(into, from, true) ?? this.loop(from, into, true);
+    if (loop) {
+      return loop;
+    }
+    if (this.aliasCount(into.id) + 1 + this.aliasCount(from.id) > MAX_TAG_ALIASES) {
+      return { kind: 'limit', what: 'aliases' };
+    }
+    const pair = { from: from.id, into: into.id };
+    if ((this.statements.mergedParentCount.get(pair)?.count ?? 0) > MAX_TAG_PARENTS) {
+      return { kind: 'limit', what: 'parents' };
+    }
+    return null;
   }
 
   /** The answer to a change made to tag `id`, or to one it did not need: the tag as it is now. */

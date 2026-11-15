@@ -58,7 +58,7 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   the file type.
 - Details panel (resizable) for the selected file: preview, metadata, location, Open and Show in
   Finder/Explorer; tag editing for one file or a multi-file selection, showing partial tags as
-  `n/total`.
+  `n/total`, and under them the tags above them that also find the files ("Also found under").
 - Duplicates: files with byte-identical content. Find duplicates checks the whole library on
   request, and tagging a file checks it (importing tags does not, since it may tag thousands of
   files at once); `is:duplicate` lists them side by side. The details panel lists a file's identical
@@ -73,6 +73,13 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   soft hyphen pasted from a web page) never distinguish two tags either, and search ignores them
   too. A name cannot contain a comma or a double quote, nor start with `=`; `/` is an ordinary
   character in it.
+- Aliases and parent tags: a tag may have other names (aliases), each the name of no other tag, and
+  parent tags (`Paris` below `France`, any number, never in a loop). `tag:France` finds the files of
+  France and of the tags below it, by a name or an alias; `tag:=France`, those of France itself.
+  The tag editor, opened from a tag in the details panel, renames a tag, gives it aliases, parent
+  tags and child tags, merges it into another tag or deletes it, each change at once; deleting a
+  tag moves its child tags up to its parent tags. A change that would put a tag below itself, or
+  give a tag more than 100 aliases or parent tags, is refused with the reason.
 - Search syntax: free text, `"exact phrase"`, `tag:`, `type:`, `ext:`, `size:`, `in:`, `is:`
   (`untagged`, `tagged`, `missing`, `offline`, `duplicate`), and a leading `-` to exclude.
 - Keyboard: ⌘/Ctrl-F or `/` to search, `T` to tag the selection, ⌘/Ctrl-, for Settings, and grid

@@ -75,6 +75,16 @@ button.active {
   white-space: nowrap;
 }
 
+/* What the line does besides adding a tag: already added, cannot be chosen, new. */
+.note {
+  color: var(--text-muted);
+}
+
+/* Can still be highlighted, to hear why it cannot be chosen. */
+button.disabled .label {
+  color: var(--text-faint);
+}
+
 .count {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;

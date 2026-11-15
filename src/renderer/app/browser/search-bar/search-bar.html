@@ -30,11 +30,20 @@
   <h2>Search syntax</h2>
   <dl>
     <dt>beach</dt>
-    <dd>names, folders or tags containing “beach”</dd>
+    <dd>
+      names, folders or tags containing “beach” (a tag by its name or an alias, with the tags below
+      it)
+    </dd>
     <dt>"summer trip"</dt>
     <dd>exact phrase</dd>
-    <dt>tag:trips</dt>
-    <dd>tagged “trips”</dd>
+    <dt>tag:France</dt>
+    <dd>tagged France or a tag below it, by its name or an alias; ignores case and accents</dd>
+    <dt>tag:=France</dt>
+    <dd>tagged France itself only</dd>
+    <dt>tag:"Paris (Texas)"</dt>
+    <dd>
+      quoted when it holds spaces; two tags cannot share a name, so tell look-alikes apart this way
+    </dd>
     <dt>-tag:draft</dt>
     <dd>a leading minus excludes</dd>
     <dt>type:video</dt>
