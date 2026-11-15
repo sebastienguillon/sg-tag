@@ -301,12 +301,13 @@ belongs to a later step:
 - The delete confirmation does not say how many files the parent tags stop finding: `TagDetails`
   cannot tell whether such a file has another tag below them, so the number could be false.
 
-**Pull request 4**
+**Settled in pull request 4**
 
-- Listing tags sorts in JavaScript after every tagging: at thousands of tags, keep the sorted
-  order until a name changes. The tags page is where thousands of tags are listed.
-- The merge preview does not say whether the merged tag has aliases, parent or child tags: the
-  editor reads them from the tags the renderer holds, which can be a moment out of date.
+- Listing tags keeps the place of each tag in the order of names and sorts again only after a
+  rename, or when a tag is new to it: 5,000 tags list in about 10 ms instead of 30, 20,000 in
+  about 45 ms instead of 150 (the rest is reading the rows).
+- The merge preview says itself what the tag that goes brings: its aliases, and how many parent
+  and child tags it has besides the tag kept.
 
 **Outside this plan** (older than it, found on the way)
 

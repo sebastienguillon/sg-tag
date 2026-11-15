@@ -118,19 +118,14 @@ export function deleteQuestion(details: TagDetails, locale: string): string {
   return sentences.join(' ');
 }
 
-/** What the tag merged away brings to the tag kept, read from the list of tags. */
-export interface MergedTag {
-  readonly aliases: number;
-  readonly parents: number;
-  readonly children: number;
-}
-
 /**
  * The question that confirms merging `preview.from` into `preview.into`: the files that gain the
- * tag kept, and what becomes of the names and the parent and child tags of the tag merged away.
- * When the merge would be refused, why, and no question.
+ * tag kept, and what becomes of the name, the aliases and the parent and child tags of the tag
+ * merged away. All of it as the worker read it for the preview, at the same moment: the list of
+ * tags may not have caught up with a change yet. When the merge would be refused, why, and no
+ * question.
  */
-export function mergeQuestion(preview: TagMergePreview, merged: MergedTag, locale: string): string {
+export function mergeQuestion(preview: TagMergePreview, locale: string): string {
   const from = quote(preview.from.name);
   const into = quote(preview.into.name);
   if (preview.refusal !== null) {
@@ -148,13 +143,14 @@ export function mergeQuestion(preview: TagMergePreview, merged: MergedTag, local
       : `${gain} (${formatNumber(preview.filesWithBoth, locale)} had both).`,
   );
 
+  const { aliases } = preview;
   const names =
-    merged.aliases === 0
+    aliases.length === 0
       ? `${from} becomes an alias of ${into}`
-      : `${from} and its aliases become aliases of ${into}`;
+      : `${from} and its ${aliases.length === 1 ? 'alias' : 'aliases'} ${nameList(aliases.map(quote), locale)} become aliases of ${into}`;
   const related = [
-    ...(merged.parents > 0 ? ['parent'] : []),
-    ...(merged.children > 0 ? ['child'] : []),
+    ...(preview.parents > 0 ? ['parent'] : []),
+    ...(preview.children > 0 ? ['child'] : []),
   ];
   sentences.push(
     related.length === 0

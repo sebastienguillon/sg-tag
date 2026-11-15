@@ -693,6 +693,9 @@ describe('DetailsPanel', () => {
         into: { id: LYON.id, name: 'Lyon' },
         filesMoved: 1,
         filesWithBoth: 0,
+        aliases: [],
+        parents: 0,
+        children: 0,
         refusal: null,
       }));
       worker.respond('mergeTags', (): TagEditResult => ({ ok: true, tag: LYON }));

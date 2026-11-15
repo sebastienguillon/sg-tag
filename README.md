@@ -19,6 +19,8 @@ Tag and retrieve the images and videos on your computer, fast. macOS, Windows an
 - Tags can have aliases and parent tags: put `Paris` below `France`, and `tag:France` also finds
   the files tagged Paris (`tag:=France` finds France itself only). Edit a tag from the details
   panel: the pencil next to it, or Enter on “already added” in the tag input.
+- All your tags on one page (Tags in the toolbar, or ⌘/Ctrl-Shift-T): filter them by name or alias,
+  list the unused ones or those without a parent, make new ones, and edit the one you pick.
 - Finds identical files (Find duplicates in the toolbar, `is:duplicate`): give the copies the same
   tags, or move the ones you do not need to the Trash.
 - **Files are never modified.** Tags live in the app's own database (see [Tags and files](#tags-and-files)).

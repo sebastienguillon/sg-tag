@@ -9,6 +9,7 @@ import {
   ElementRef,
   inject,
   Injector,
+  input,
   linkedSignal,
   LOCALE_ID,
   model,
@@ -65,7 +66,7 @@ type Confirmation =
 /**
  * Edits one tag: its name, parent tags, child tags and aliases, each change applied at once, and
  * deletes it or merges it into another. Knows nothing of the files selected: it shows in the
- * details panel, and is meant for the tags page as well.
+ * details panel, and on the tags page.
  *
  * Escape closes it (`closed`), unless a field or a confirmation takes the key first: a field
  * holding text empties, a name being changed goes back, a confirmation is cancelled. The host puts
@@ -88,6 +89,18 @@ export class TagEditor {
 
   /** The tag edited. The editor sets it when that tag is merged into another: it follows it. */
   readonly tagId = model.required<number>();
+  /**
+   * Whether the name field takes the focus each time another tag is shown, as in the details
+   * panel, where the editor opens when asked. On the tags page it shows the tag selected in the
+   * list, which keeps the focus while it moves from tag to tag: the field takes it when asked
+   * (`focus`).
+   */
+  readonly focusOnShow = input(true);
+  /**
+   * Whether the header offers to close the editor. Not on the tags page, where the editor always
+   * shows the tag selected, and Escape only gives the focus back to the list.
+   */
+  readonly closable = input(true);
   /** Escape or Close: the host takes the editor away. */
   readonly closed = output();
   /**
@@ -117,7 +130,7 @@ export class TagEditor {
   /** Bumped to ask for the focus in the name field once the tag is shown. */
   private readonly focusRequests = signal(0);
   /** The request and the tag the name field last took the focus for. */
-  private focused = { request: -1, tagId: Number.NaN };
+  private focused = { request: 0, tagId: Number.NaN };
 
   private readonly details = resource({
     params: () => ({
@@ -251,16 +264,7 @@ export class TagEditor {
     if (preview === null) {
       return { question: 'One of the two tags no longer exists.', allowed: false };
     }
-    const merged = this.tags.byId().get(preview.from.id);
-    const counts = {
-      aliases: merged?.aliases.length ?? 0,
-      parents: merged?.parentIds.length ?? 0,
-      children: this.tags.below(preview.from.id).length,
-    };
-    return {
-      question: mergeQuestion(preview, counts, this.locale),
-      allowed: preview.refusal === null,
-    };
+    return { question: mergeQuestion(preview, this.locale), allowed: preview.refusal === null };
   });
   protected readonly deleteText = computed(() => {
     const details = this.shown();
@@ -273,8 +277,8 @@ export class TagEditor {
     });
     inject(DestroyRef).onDestroy(unsubscribe);
 
-    // The name field takes the focus each time another tag is shown, and when asked to (`focus`),
-    // once the tag is read: on opening, the field is not there yet.
+    // The name field takes the focus each time another tag is shown (`focusOnShow`), and when asked
+    // to (`focus`), once the tag is read: on opening, the field is not there yet.
     afterRenderEffect({
       write: () => {
         const request = this.focusRequests();
@@ -283,7 +287,8 @@ export class TagEditor {
         if (!field || this.shown()?.tag.id !== id) {
           return;
         }
-        if (request !== this.focused.request || id !== this.focused.tagId) {
+        const shownAnew = this.focusOnShow() && id !== this.focused.tagId;
+        if (request !== this.focused.request || shownAnew) {
           this.focused = { request, tagId: id };
           field.nativeElement.focus();
         }

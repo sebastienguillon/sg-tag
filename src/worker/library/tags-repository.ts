@@ -409,6 +409,13 @@ interface DefinitionPlan {
 export class TagsRepository {
   private readonly db: Db;
   private readonly statements: ReturnType<typeof prepareStatements>;
+  /**
+   * The place of each tag in the order of names, as `list` last worked it out: comparing names is
+   * most of its time (some 30 ms for 5,000 tags), and it lists them again after every tagging. It is
+   * used again unless a tag was renamed (`renameTag` forgets it) or is unknown to it (a new tag); a
+   * tag deleted only leaves a gap.
+   */
+  private nameOrder: Map<number, number> | null = null;
 
   constructor(db: Db) {
     this.db = db;
@@ -441,13 +448,31 @@ export class TagsRepository {
         tag.fileCount = fileCount;
       }
     }
-    return [...tags.values()].sort(byName).map((tag) => ({
-      id: tag.id,
-      name: tag.name,
-      aliases: tag.aliases.sort(byName).map((alias) => alias.name),
-      parentIds: tag.parents.sort(byName).map((parent) => parent.id),
-      fileCount: tag.fileCount,
-    }));
+    const order = this.sortedByName([...tags.values()]);
+    const place = (tag: TagRow): number => order.get(tag.id) ?? 0;
+    return [...tags.values()]
+      .sort((a, b) => place(a) - place(b))
+      .map((tag) => ({
+        id: tag.id,
+        name: tag.name,
+        aliases: tag.aliases.sort(byName).map((alias) => alias.name),
+        parentIds: tag.parents.sort((a, b) => place(a) - place(b)).map((parent) => parent.id),
+        fileCount: tag.fileCount,
+      }));
+  }
+
+  /**
+   * The place of each of `tags`, every tag of the library, in the order of names: as last worked
+   * out when it knows them all, else worked out again.
+   */
+  private sortedByName(tags: readonly TagRow[]): ReadonlyMap<number, number> {
+    const known = this.nameOrder;
+    if (known && tags.every((tag) => known.has(tag.id))) {
+      return known;
+    }
+    const order = new Map([...tags].sort(byName).map((tag, index) => [tag.id, index]));
+    this.nameOrder = order;
+    return order;
   }
 
   /** One tag as `list()` gives it, or `null` when no tag has this id. */
@@ -621,6 +646,8 @@ export class TagsRepository {
    * alias only with `keepOldName`. The very name it has changes nothing.
    */
   renameTag(id: number, name: string, keepOldName: boolean): TagEditResult {
+    // Its place among the names may change, even for a change of letter case only.
+    this.nameOrder = null;
     return this.transaction((): TagEditResult => {
       const current = this.statements.nameOf.get(id);
       if (!current) {
@@ -831,11 +858,20 @@ export class TagsRepository {
         return null;
       }
       const files = this.statements.mergedFiles.get({ from: fromId, into: intoId });
+      const others = (rows: readonly TagRow[]): number =>
+        rows.filter((row) => row.id !== intoId).length;
       return {
         from: toRef(from),
         into: toRef(into),
         filesMoved: files?.moved ?? 0,
         filesWithBoth: files?.both ?? 0,
+        aliases: this.statements.namesOf
+          .all(fromId)
+          .filter((row) => row.isAlias === 1)
+          .sort(byName)
+          .map((row) => row.name),
+        parents: others(this.statements.parentsOf.all(fromId)),
+        children: others(this.statements.childrenOf.all(fromId)),
         refusal: this.mergeRefusal(toRef(from), toRef(into)),
       };
     });

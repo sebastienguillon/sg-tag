@@ -144,41 +144,44 @@ describe('mergeQuestion', () => {
     into: PARIS,
     filesMoved: 12,
     filesWithBoth: 3,
+    aliases: [],
+    parents: 0,
+    children: 0,
     refusal: null,
     ...more,
   });
 
   it('says which files gain the tag kept, and what becomes of the other one', () => {
-    expect(mergeQuestion(preview(), { aliases: 2, parents: 1, children: 1 }, 'en')).toBe(
-      'Merge “Paname” into “Paris”? 12 files gain Paris (3 had both). Paname and its aliases become aliases of Paris, and its parent and child tags become those of Paris. This cannot be undone.',
-    );
     expect(
-      mergeQuestion(
-        preview({ filesMoved: 0, filesWithBoth: 0 }),
-        { aliases: 0, parents: 0, children: 0 },
-        'en',
-      ),
+      mergeQuestion(preview({ aliases: ['Lutèce', 'Lutetia'], parents: 1, children: 1 }), 'en'),
     ).toBe(
+      'Merge “Paname” into “Paris”? 12 files gain Paris (3 had both). Paname and its aliases Lutèce and Lutetia become aliases of Paris, and its parent and child tags become those of Paris. This cannot be undone.',
+    );
+    expect(mergeQuestion(preview({ filesMoved: 0, filesWithBoth: 0 }), 'en')).toBe(
       'Merge “Paname” into “Paris”? No file gains Paris. Paname becomes an alias of Paris. This cannot be undone.',
     );
-    expect(
-      mergeQuestion(
-        preview({ filesMoved: 1, filesWithBoth: 0 }),
-        { aliases: 0, parents: 0, children: 4 },
-        'en',
-      ),
-    ).toBe(
+    expect(mergeQuestion(preview({ filesMoved: 1, filesWithBoth: 0, children: 4 }), 'en')).toBe(
       'Merge “Paname” into “Paris”? 1 file gains Paris. Paname becomes an alias of Paris, and its child tags become those of Paris. This cannot be undone.',
     );
   });
 
+  it('names the aliases of the tag merged away, and counts them past the fifth', () => {
+    expect(mergeQuestion(preview({ aliases: ['Lutèce'], parents: 2 }), 'en')).toBe(
+      'Merge “Paname” into “Paris”? 12 files gain Paris (3 had both). Paname and its alias Lutèce become aliases of Paris, and its parent tags become those of Paris. This cannot be undone.',
+    );
+    const aliases = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+    expect(mergeQuestion(preview({ aliases }), 'en')).toContain(
+      'Paname and its aliases A, B, C, D and 3 others become aliases of Paris.',
+    );
+    // A long one, as pasted, by its start.
+    expect(mergeQuestion(preview({ aliases: ['x'.repeat(100)] }), 'en')).toContain(
+      `Paname and its alias ${'x'.repeat(60)}… become aliases of Paris.`,
+    );
+  });
+
   it('says why the merge would be refused, and asks nothing', () => {
-    expect(
-      mergeQuestion(
-        preview({ refusal: { kind: 'limit', what: 'aliases' } }),
-        { aliases: 0, parents: 0, children: 0 },
-        'en',
-      ),
-    ).toBe('Paname cannot be merged into Paris. A tag cannot have more than 100 aliases.');
+    expect(mergeQuestion(preview({ refusal: { kind: 'limit', what: 'aliases' } }), 'en')).toBe(
+      'Paname cannot be merged into Paris. A tag cannot have more than 100 aliases.',
+    );
   });
 });

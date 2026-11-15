@@ -1,0 +1,144 @@
+<header class="toolbar">
+  <a class="icon-button" routerLink="/" aria-label="Back to library" title="Back">
+    <app-icon name="arrow-left" />
+  </a>
+  <h1>Tags</h1>
+</header>
+
+<div class="page">
+  <div class="list-pane">
+    <div class="filters">
+      <div class="field">
+        <app-icon name="search" />
+        <input
+          #filterField
+          type="search"
+          aria-label="Filter tags"
+          placeholder="Filter by name or alias"
+          spellcheck="false"
+          autocomplete="off"
+          [value]="filterText()"
+          (input)="onFilterInput($event)"
+          (keydown)="onFilterKeydown($event)"
+        />
+      </div>
+      <button
+        type="button"
+        class="button toggle"
+        title="Unused: only the tags no file has"
+        [attr.aria-pressed]="unusedOnly()"
+        (click)="toggleUnused()"
+      >
+        Unused
+      </button>
+      <button
+        type="button"
+        class="button toggle"
+        title="No parent: only the tags without a parent tag"
+        [attr.aria-pressed]="withoutParentOnly()"
+        (click)="toggleWithoutParent()"
+      >
+        No parent
+      </button>
+    </div>
+
+    <div class="list-header">
+      <div class="header-line">
+        <span class="count" role="status">{{ countText() }}</span>
+        <button
+          #newTagButton
+          type="button"
+          class="button"
+          [attr.aria-expanded]="creating()"
+          (click)="toggleNewTag()"
+        >
+          <app-icon name="plus" /> New tag
+        </button>
+      </div>
+      @if (creating()) {
+        <input
+          #newTagField
+          type="text"
+          class="text-field"
+          aria-label="Name of the new tag"
+          placeholder="Name of the new tag"
+          spellcheck="false"
+          autocomplete="off"
+          [value]="newName()"
+          [attr.aria-invalid]="createRefusal() === null ? null : 'true'"
+          [attr.aria-describedby]="createRefusal() === null ? null : 'new-tag-refusal'"
+          (input)="onNewNameInput($event)"
+          (keydown)="onNewNameKeydown($event)"
+        />
+        @if (createRefusal(); as refusal) {
+          <p id="new-tag-refusal" class="error" role="alert">{{ refusal.message }}</p>
+          @if (refusal.owner; as owner) {
+            <button type="button" class="button offer" (click)="editTag(owner.id)">
+              Edit {{ owner.name }}
+            </button>
+          }
+        }
+      }
+    </div>
+
+    <cdk-virtual-scroll-viewport
+      class="list"
+      role="listbox"
+      aria-label="Tags"
+      tabindex="0"
+      [itemSize]="rowHeight"
+      [minBufferPx]="rowHeight * 10"
+      [maxBufferPx]="rowHeight * 20"
+      [attr.aria-activedescendant]="activeDescendant()"
+      (keydown)="onListKeydown($event)"
+      (click)="onListClick($event)"
+    >
+      <div
+        *cdkVirtualFor="let row of rows(); let index = index; trackBy: trackById"
+        class="row"
+        role="option"
+        [id]="rowId(row.tag.id)"
+        [class.selected]="row.tag.id === selectedId()"
+        [attr.aria-selected]="row.tag.id === selectedId()"
+        [attr.aria-setsize]="rows().length"
+        [attr.aria-posinset]="index + 1"
+        [attr.data-index]="index"
+      >
+        <span class="name">{{ row.tag.name }}</span>
+        <span class="parents">{{ row.parents }}</span>
+        <span class="files"
+          >{{ row.tag.fileCount | number }} {{ row.tag.fileCount === 1 ? 'file' : 'files' }}</span
+        >
+        <!-- Empty when it has none: the column stays in line with the rows that do. -->
+        <span class="below">
+          @if (row.below > 0) {
+            {{ row.below | number }} {{ row.below === 1 ? 'tag' : 'tags' }} below
+          }
+        </span>
+      </div>
+    </cdk-virtual-scroll-viewport>
+  </div>
+
+  <div class="editor-pane">
+    @if (selectedId(); as id) {
+      <app-tag-editor
+        [tagId]="id"
+        [focusOnShow]="false"
+        [closable]="false"
+        (tagIdChange)="onEditorTagChange($event)"
+        (closed)="onEditorClosed()"
+        (deleted)="onDeleted()"
+        (searchRequested)="search($event)"
+      />
+    } @else if (empty()) {
+      <div class="none">
+        <p>No tag yet.</p>
+        <button type="button" class="button primary" (click)="openNewTag()">
+          <app-icon name="plus" /> New tag
+        </button>
+      </div>
+    } @else if (loaded()) {
+      <p class="none">Choose a tag to edit it.</p>
+    }
+  </div>
+</div>

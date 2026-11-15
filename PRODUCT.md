@@ -76,13 +76,19 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 - Aliases and parent tags: a tag may have other names (aliases), each the name of no other tag, and
   parent tags (`Paris` below `France`, any number, never in a loop). `tag:France` finds the files of
   France and of the tags below it, by a name or an alias; `tag:=France`, those of France itself.
-  The tag editor, opened from a tag in the details panel, renames a tag, gives it aliases, parent
-  tags and child tags, merges it into another tag or deletes it, each change at once; deleting a
-  tag moves its child tags up to its parent tags. A change that would put a tag below itself, or
-  give a tag more than 100 aliases or parent tags, is refused with the reason.
+  The tag editor, opened from a tag in the details panel or on the tags page, renames a tag, gives
+  it aliases, parent tags and child tags, merges it into another tag or deletes it, each change at
+  once; deleting a tag moves its child tags up to its parent tags. A change that would put a tag
+  below itself, or give a tag more than 100 aliases or parent tags, is refused with the reason.
+- Tags page (Tags in the toolbar, or ⌘/Ctrl-Shift-T from any page): every tag in one list sorted by
+  name, each with its parent tags, how many files have it and how many tags are below it; a filter
+  by name or alias, combined with Unused (no file has the tag) and No parent; New tag, for a tag no
+  file has yet; and beside the list, the tag editor of the tag selected. The arrows move through
+  the list, Enter goes into the editor and Escape comes back to the list.
 - Search syntax: free text, `"exact phrase"`, `tag:`, `type:`, `ext:`, `size:`, `in:`, `is:`
   (`untagged`, `tagged`, `missing`, `offline`, `duplicate`), and a leading `-` to exclude.
-- Keyboard: ⌘/Ctrl-F or `/` to search, `T` to tag the selection, ⌘/Ctrl-, for Settings, and grid
+- Keyboard: ⌘/Ctrl-F or `/` to search, `T` to tag the selection, ⌘/Ctrl-Shift-T for the tags page
+  and ⌘/Ctrl-, for Settings (both from any page, matched on the character typed), and grid
   navigation and selection from the keyboard.
 - Zoom: ⌘/Ctrl with `+` or `=`, `-` and `0` (keypad too, on any keyboard layout), Ctrl + mouse wheel
   on Windows and Linux, or the View menu; 50% to 300%, remembered across launches.
@@ -106,7 +112,7 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   the first time a later version opens it, and those versions can no longer use it: only a copy of
   the data folder made beforehand keeps its tags.
 - Terminology: _library folders_ (the roots the user adds), _data folder_, _tags_, _tags export_,
-  _selection_, _details panel_, _missing_ and _offline_ files, _indexing_.
+  _selection_, _details panel_, _tags page_, _missing_ and _offline_ files, _indexing_.
 - Heavy work (indexing, watching, thumbnails, database) runs in a separate indexer process, never
   in the interface.
 - License: MIT, for the app's own code. Installers also ship LGPL components (libvips inside
