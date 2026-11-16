@@ -70,7 +70,10 @@ export interface CatalogueRow {
   /** Tag names, each once (`tagKey`), the subcategory and the category left out. */
   readonly formats: readonly string[];
   readonly confidence: string | null;
+  /** Further review is needed: `Needs further review` is `True`, or gives reasons. */
   readonly flagged: boolean;
+  /** Why, when the catalogue says: `["place not stated"]`. */
+  readonly reviewReasons: readonly string[];
   readonly reviewStatus: string | null;
   readonly topic: string | null;
   readonly visibleContent: string | null;
@@ -199,6 +202,8 @@ class RowReader {
   private readonly platform: string;
   /** The index of each column read, once the header is read. */
   private columns: Readonly<Record<Column, number>> | null = null;
+  /** The indexes of `columns` the header has. */
+  private used: readonly number[] = [];
   private readonly rows: CatalogueRow[] = [];
   private readonly paths = new Set<string>();
   /** Each label as written, made a tag name once: thousands of rows share a few dozen. */
@@ -215,12 +220,14 @@ class RowReader {
   read(fields: readonly string[], record: number): void {
     if (this.columns === null) {
       this.columns = columnsOf(fields);
+      this.used = Object.values(this.columns).filter((index) => index !== -1);
       return;
     }
     if (this.rows.length + this.invalid >= MAX_CATALOGUE_ROWS) {
       throw new CatalogueError(TOO_MANY_ROWS);
     }
-    if (fields.some((field) => field.length > MAX_FIELD_UNITS)) {
+    // Only those read: other columns may hold long evidence (JSON of what was seen and heard).
+    if (this.used.some((index) => (fields[index]?.length ?? 0) > MAX_FIELD_UNITS)) {
       this.problem(record, 'a field is too long');
       return;
     }
@@ -231,7 +238,7 @@ class RowReader {
     const written = field('path');
     const segments = written === '' ? null : this.segmentsOf(written);
     if (segments === null) {
-      this.problem(record, written === '' ? 'no source path' : 'its source path cannot be read');
+      this.problem(record, pathProblem(written));
       return;
     }
     const category = this.label(field('category'));
@@ -246,6 +253,7 @@ class RowReader {
       return;
     }
     this.paths.add(path);
+    const review = reviewOf(field('flagged'));
     this.rows.push({
       row: record,
       path: written,
@@ -256,7 +264,8 @@ class RowReader {
       subcategory,
       formats: this.formatsOf(field('formats'), [category, subcategory]),
       confidence: optional(field('confidence')),
-      flagged: field('flagged').toLowerCase() === 'true',
+      flagged: review.flagged,
+      reviewReasons: review.reasons,
       reviewStatus: optional(field('reviewStatus')),
       topic: optional(field('topic')),
       visibleContent: optional(field('visibleContent')),
@@ -316,11 +325,17 @@ class RowReader {
     return label?.name ?? null;
   }
 
-  /** The format tags of `input`, separated by `;`, each once, none of `subject`. */
+  /**
+   * The format tags of `input`, each once, none of `subject`. A catalogue writes them as a JSON
+   * list (`["phone video", "selfie"]`) or separated by `;` (`phone video; selfie`); text in square
+   * brackets that is no list (`[withheld: handling limit]`) gives none.
+   */
   private formatsOf(input: string, subject: readonly string[]): string[] {
     const seen = new Set(subject.map((name) => tagKey(name)));
     const formats: string[] = [];
-    for (const part of input.split(';')) {
+    const bracketed = input.startsWith('[') && input.endsWith(']');
+    const listed = bracketed ? (listOf(input) ?? []) : input.split(';');
+    for (const part of listed) {
       const written = part.trim();
       if (written === '') {
         continue;
@@ -387,6 +402,56 @@ function columnsOf(header: readonly string[]): Record<Column, number> {
 
 function missingColumn(column: Column): string {
   return `This file is not a classification catalogue: it has no “${COLUMNS[column]}” column.`;
+}
+
+/**
+ * Why `written` is no path that can be read. A catalogue withholds the path of a file it restricts
+ * (`[withheld: retained processing restriction]`).
+ */
+function pathProblem(written: string): string {
+  if (written === '') {
+    return 'no source path';
+  }
+  return written.startsWith('[') && written.endsWith(']')
+    ? 'the catalogue withholds its source path'
+    : 'its source path cannot be read';
+}
+
+/**
+ * The strings of `text` when it is a JSON list, trimmed, empty ones left out; `null` when it is
+ * not one. Items that are not strings are left out.
+ */
+function listOf(text: string): string[] | null {
+  if (!text.startsWith('[') || !text.endsWith(']')) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  return Array.isArray(parsed)
+    ? parsed.flatMap((item) =>
+        typeof item === 'string' && item.trim() !== '' ? [item.trim()] : [],
+      )
+    : null;
+}
+
+/**
+ * What `Needs further review` says, as a catalogue writes it: `True` or `False`, or the reasons
+ * further review is needed, as a JSON list (`[]` for none) or as text.
+ */
+function reviewOf(text: string): { flagged: boolean; reasons: string[] } {
+  const lower = text.toLowerCase();
+  if (lower === '' || lower === 'false' || lower === 'no') {
+    return { flagged: false, reasons: [] };
+  }
+  if (lower === 'true' || lower === 'yes') {
+    return { flagged: true, reasons: [] };
+  }
+  const reasons = listOf(text) ?? [text];
+  return { flagged: reasons.length > 0, reasons };
 }
 
 /** `text`, or `null` when it is empty. */

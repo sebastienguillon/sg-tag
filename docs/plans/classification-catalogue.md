@@ -19,7 +19,8 @@ both read-only.
    "Keep … as an alias", or merged into another, is found again by its old name on the next import.
    No mapping table.
 3. **The import leaves out, by default**, rows of low confidence, rows marked `Needs further review`
-   = `True`, and the category "Needs context or audio review", each with a checkbox to include it.
+   (`True`, or reasons), and the category "Needs context or audio review", each with a checkbox to
+   include it.
    In the real catalogue that is 35, 757 and 34 rows: 5,003 of 5,770 remain, in 19 categories and 45
    subcategories.
 4. **Format tags** (`Format and secondary tags`): the import gives a file one only when a tag of the
@@ -35,24 +36,34 @@ both read-only.
 | `Source path`                                                      | required: the file, by its absolute path on this computer |
 | `Suggested category`, `Subcategory`                                | required: tags, the subcategory below the category        |
 | `Original size bytes`, `Original mtime nanoseconds`                | finding the file (see Finding files)                      |
-| `Format and secondary tags`                                        | format tags, separated by `;`                             |
+| `Format and secondary tags`                                        | format tags, a JSON list or separated by `;`              |
 | `Confidence in category`, `Needs further review`                   | the import's filters                                      |
 | `Topic detail`, `Visible content`, `Review notes`, `Review status` | shown in the details panel, never tags                    |
 | every other column                                                 | not read                                                  |
 
 Columns are found by their header, as the skill writes it. A file without the three required
-columns is refused, saying which one is missing. An empty `Needs further review` (older rows) is not
-`True`.
+columns is refused, saying which one is missing.
+
+Catalogues of different runs write some columns differently, and each way is read:
+
+- `Format and secondary tags`: `phone video; selfie` (October 2026), or a JSON list
+  `["phone video", "selfie"]` (November 2026). Text in square brackets that is no list
+  (`[withheld: handling limit]`) gives no tag.
+- `Needs further review`: `True` or `False`, or the reasons as a JSON list (`[]` for none) or as
+  text. Reasons mark the row, and the details panel lists them. Empty is not marked.
+- `Source path`: a file the catalogue restricts has its path withheld
+  (`[withheld: retained processing restriction]`): the row is left out, saying so.
 
 ## Reading it
 
 - `src/worker/catalogue/catalogue-file.ts` reads CSV as RFC 4180 has it: quoted fields, doubled
   quotes, line breaks inside quotes, CRLF or LF; a byte order mark is dropped. UTF-8 only: a file
   that is not valid UTF-8 is refused.
-- Refused above 256 MiB (the real one is 7.6 MB) or 1,000,000 rows. A row without a path, with a
-  path that is not absolute or holds a `..` segment, without a category or subcategory, or with a
-  field longer than 32,767 characters, is left out and counted, the first few named by row number
-  without quoting the file, as tags exports do.
+- Refused above 256 MiB (the whole-library one is 66.6 MB) or 1,000,000 rows. A row without a
+  path, with a path that is not absolute or holds a `..` segment, without a category or
+  subcategory, or with a field read longer than 32,767 characters, is left out and counted, the
+  first few named by row number without quoting the file, as tags exports do. Columns not read may
+  be longer: they hold the JSON of what was seen and heard.
 - Read a slice at a time (`Slicer`), so that the indexer keeps answering searches. Only the columns
   used are kept.
 - A label SG Tag refuses as a tag name is rewritten as the TagStudio import rewrites one (`rewrite`:
@@ -124,6 +135,10 @@ Expected on the author's library: 19 categories and 45 subcategories made, 45 pa
 Run on a copy of it (2026-11-16): 64 tags made, 45 links, 5,016 tags added to 4,999 files (4,999
 found at their place, 4 deleted since), 786 format labels left out; open 55 ms, preview 242 ms,
 import 57 ms; importing again adds nothing.
+The whole-library catalogue of 2026-11-15 (15,754 rows, 67 columns, 66.6 MB), on a copy of the
+library (2026-11-16): read in 0.8 s; 730 rows withheld; 11,955 rows kept (145 of low confidence,
+3,022 marked for review, 56 of unclear subject left out); 11,950 files found at their place, 5
+not indexed as media; 64 tags made, 45 links, 12,056 tags added; importing again adds nothing.
 
 ## Settings
 

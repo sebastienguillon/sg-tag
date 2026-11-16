@@ -185,6 +185,7 @@ describe('DetailsPanel', () => {
       subcategory: 'Wildlife',
       confidence: 'high',
       flagged: false,
+      reviewReasons: [],
       reviewStatus: null,
       topic: null,
       visibleContent: null,

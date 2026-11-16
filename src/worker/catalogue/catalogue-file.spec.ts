@@ -78,6 +78,7 @@ describe('parseCatalogue', () => {
           formats: ['phone video', 'selfie'],
           confidence: 'medium',
           flagged: true,
+          reviewReasons: [],
           reviewStatus: 'Reviewed; context caveat',
           topic: 'A cat on a sofa',
           visibleContent: 'A grey cat.',
@@ -130,9 +131,11 @@ describe('parseCatalogue', () => {
       row({ path: '/media/d.jpg' }),
       row({ path: '/media/d.jpg' }),
       row({ path: '/media/e.jpg', notes: 'x'.repeat(32_768) }),
+      // A long field of a column not read, such as the JSON of what was seen and heard.
+      row({ path: '/media/f.jpg' }).replace('"001"', 'x'.repeat(32_768)),
     ]);
 
-    expect(parsed.rows.map((each) => each.path)).toEqual(['/media/d.jpg']);
+    expect(parsed.rows.map((each) => each.path)).toEqual(['/media/d.jpg', '/media/f.jpg']);
     expect(parsed.invalid).toBe(7);
     expect(parsed.problems).toEqual([
       'Row 2: no source path.',
@@ -141,6 +144,16 @@ describe('parseCatalogue', () => {
       'Row 5: no category.',
       'Row 6: no subcategory.',
     ]);
+  });
+
+  it('says when the catalogue withholds the path of a file', async () => {
+    const parsed = await parse([
+      HEADER,
+      row({ path: '[withheld: retained processing restriction]' }),
+      row({ path: '/media/a.jpg' }),
+    ]);
+
+    expect(parsed.problems).toEqual(['Row 2: the catalogue withholds its source path.']);
   });
 
   it('refuses a catalogue without a row that can be read', async () => {
@@ -205,6 +218,47 @@ describe('parseCatalogue', () => {
     ]);
 
     expect(parsed.rows[0]?.formats).toEqual(['Selfie', 'crowd']);
+  });
+
+  it('reads format tags written as a JSON list, and none of a note in square brackets', async () => {
+    const parsed = await parse([
+      HEADER,
+      row({
+        path: '/media/a.jpg',
+        formats: `["terror attack victims' families", "grief testimony", " interview ", "", 3]`,
+      }),
+      row({ path: '/media/b.jpg', formats: '["gun-like object (tail 58.0 s; replica?)"]' }),
+      row({ path: '/media/c.jpg', formats: '[withheld: handling limit]' }),
+      row({ path: '/media/d.jpg', formats: '[]' }),
+    ]);
+
+    expect(parsed.rows.map((each) => each.formats)).toEqual([
+      ["terror attack victims' families", 'grief testimony', 'interview'],
+      ['gun-like object (tail 58.0 s; replica?)'],
+      [],
+      [],
+    ]);
+    expect(parsed.renamed).toBe(0);
+    expect(parsed.leftOut).toBe(0);
+  });
+
+  it('reads whether a file needs further review, and why when the catalogue says', async () => {
+    const parsed = await parse([
+      HEADER,
+      row({ path: '/media/a.jpg', flagged: 'False' }),
+      row({ path: '/media/b.jpg', flagged: 'TRUE' }),
+      row({ path: '/media/c.jpg', flagged: '[]' }),
+      row({ path: '/media/d.jpg', flagged: '["place not stated", "tail frame failed"]' }),
+      row({ path: '/media/e.jpg', flagged: 'Subject remains unresolved' }),
+    ]);
+
+    expect(parsed.rows.map(({ flagged, reviewReasons }) => [flagged, reviewReasons])).toEqual([
+      [false, []],
+      [true, []],
+      [false, []],
+      [true, ['place not stated', 'tail frame failed']],
+      [true, ['Subject remains unresolved']],
+    ]);
   });
 
   it('reads a size or a date that is not a whole number as unknown', async () => {

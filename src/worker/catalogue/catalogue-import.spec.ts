@@ -20,6 +20,7 @@ function row(path: string, fields: Partial<CatalogueRow> = {}): CatalogueRow {
     formats: [],
     confidence: 'high',
     flagged: false,
+    reviewReasons: [],
     reviewStatus: null,
     topic: null,
     visibleContent: null,

@@ -21,10 +21,19 @@
       </p>
     }
     @if (entry.flagged) {
-      <p class="notice">
+      <div class="notice">
         <app-icon name="alert" />
-        <span>Flagged for further review{{ reviewStatusOf(entry) }}</span>
-      </p>
+        <div>
+          <p>Flagged for further review{{ reviewStatusOf(entry) }}</p>
+          @if (entry.reviewReasons.length > 0) {
+            <ul class="reasons">
+              @for (reason of entry.reviewReasons; track $index) {
+                <li>{{ reason }}</li>
+              }
+            </ul>
+          }
+        </div>
+      </div>
     }
     <dl class="meta">
       @if (entry.confidence !== null) {

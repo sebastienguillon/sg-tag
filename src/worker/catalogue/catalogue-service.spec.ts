@@ -119,6 +119,7 @@ describe('CatalogueService', () => {
       subcategory: 'Wildlife',
       confidence: 'high',
       flagged: false,
+      reviewReasons: [],
       reviewStatus: null,
       topic: 'A cat',
       visibleContent: null,

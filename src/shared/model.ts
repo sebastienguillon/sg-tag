@@ -622,6 +622,8 @@ export interface CatalogueEntry {
   readonly confidence: string | null;
   /** Marked for further review. */
   readonly flagged: boolean;
+  /** Why it needs further review, when the catalogue says. */
+  readonly reviewReasons: readonly string[];
   readonly reviewStatus: string | null;
   readonly topic: string | null;
   readonly visibleContent: string | null;

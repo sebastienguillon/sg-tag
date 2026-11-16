@@ -147,6 +147,7 @@ export class CatalogueService {
       subcategory: row.subcategory,
       confidence: row.confidence,
       flagged: row.flagged,
+      reviewReasons: row.reviewReasons,
       reviewStatus: row.reviewStatus,
       topic: row.topic,
       visibleContent: row.visibleContent,

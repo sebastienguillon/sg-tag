@@ -48,6 +48,14 @@ p {
   color: var(--warning);
 }
 
+.reasons {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding-left: 16px;
+  user-select: text;
+}
+
 .path {
   font-family: var(--font-mono);
   font-size: 11px;

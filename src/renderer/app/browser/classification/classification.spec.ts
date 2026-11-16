@@ -10,6 +10,7 @@ const entry: CatalogueEntry = {
   subcategory: 'Wildlife pets and animal interactions',
   confidence: 'high',
   flagged: false,
+  reviewReasons: [],
   reviewStatus: null,
   topic: 'A cat on a sofa',
   visibleContent: 'A grey cat.',
@@ -93,6 +94,20 @@ describe('Classification', () => {
 
     await mount({ ...entry, found: 'moved', classifiedPath: '/library/Unsorted/cat.jpg' });
     expect(text('.notice')).toBe('Classified at /library/Unsorted/cat.jpg');
+  });
+
+  it('lists why the file needs further review, when the catalogue says', async () => {
+    await mount({
+      ...entry,
+      flagged: true,
+      reviewReasons: ['place not stated', 'tail frame failed'],
+    });
+
+    expect(text('.notice p')).toBe('Flagged for further review');
+    expect([...host.querySelectorAll('.notice li')].map((item) => item.textContent)).toEqual([
+      'place not stated',
+      'tail frame failed',
+    ]);
   });
 
   it('adds a suggested tag, or all those the file lacks, and none it has', async () => {
