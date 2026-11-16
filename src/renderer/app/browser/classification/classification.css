@@ -1,0 +1,144 @@
+/* No box of its own: when the catalogue does not list the file, the panel has no gap for it. */
+:host {
+  display: contents;
+}
+
+section {
+  display: grid;
+  gap: 8px;
+}
+
+h3,
+h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+h4 {
+  margin-top: 4px;
+}
+
+p {
+  margin: 0;
+}
+
+.subject {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.notice {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-s);
+  background: var(--warning-bg);
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.notice app-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--warning);
+}
+
+.reasons {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding-left: 16px;
+  user-select: text;
+}
+
+.path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  user-select: text;
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.meta:empty {
+  display: none;
+}
+
+dt {
+  color: var(--text-muted);
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.suggestions li {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+/* A chip waiting to be added: outlined, as a partial tag is. */
+.suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 10px 3px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--chip-bg);
+  color: var(--chip-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.suggestion:hover:not(.added) {
+  background: var(--chip-bg);
+}
+
+.suggestion.added {
+  background: var(--chip-bg);
+  cursor: default;
+}
+
+.parent {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 12px;
+}

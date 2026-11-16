@@ -2,6 +2,8 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed } from '@angular/core/testing';
 import type { DesktopBridge } from '@shared/desktop-api';
 import type {
+  CatalogueImportDetails,
+  CatalogueStatus,
   IndexStatus,
   Tag,
   TagExportRecord,
@@ -40,6 +42,7 @@ const source: TagImportSource = {
   invalid: 0,
   problems: [],
   tagStudio: null,
+  catalogue: null,
 };
 
 /** A tags export that describes no tag, or one whose tags are all here as it describes them. */
@@ -212,6 +215,7 @@ describe('TagTransfer', () => {
     lastExport = null;
     worker.respond('getLastTagExport', () => lastExport);
     worker.respond('closeTagImport', () => undefined);
+    worker.respond('getCatalogue', () => null);
     exportTags = () => Promise.resolve(null);
     openTagImport = () => Promise.resolve(null);
     openTagStudioImport = () => Promise.resolve(null);
@@ -677,6 +681,7 @@ describe('TagTransfer', () => {
       'Export tags…',
       'Import tags…',
       'Import from TagStudio…',
+      'Import from catalogue…',
       'Check again',
       'Close',
     ]);
@@ -701,6 +706,7 @@ describe('TagTransfer', () => {
       'Export tags…',
       'Import tags…',
       'Import from TagStudio…',
+      'Import from catalogue…',
       'Check again',
       'Close',
     ]);
@@ -821,6 +827,7 @@ describe('TagTransfer', () => {
       'Export tags…',
       'Import tags…',
       'Import from TagStudio…',
+      'Import from catalogue…',
       'Check again',
       'Cancel',
       'Import tags',
@@ -878,6 +885,7 @@ describe('TagTransfer', () => {
       'Export tags…',
       'Import tags…',
       'Import from TagStudio…',
+      'Import from catalogue…',
       'Check again',
       'Cancel',
       'Import tags',
@@ -900,6 +908,7 @@ describe('TagTransfer', () => {
       'Export tags…',
       'Import tags…',
       'Import from TagStudio…',
+      'Import from catalogue…',
       'Check again',
       'Close',
     ]);
@@ -919,6 +928,7 @@ describe('TagTransfer', () => {
       'Export tags…',
       'Import tags…',
       'Import from TagStudio…',
+      'Import from catalogue…',
       'Check again',
       'Close',
     ]);
@@ -1360,6 +1370,179 @@ describe('TagTransfer', () => {
     await render();
     expect(worker.callsTo('applyTagImport')).toEqual([['token-1', 2, true]]);
   });
+  describe('from a classification catalogue', () => {
+    const chosen: CatalogueStatus = {
+      path: 'D:\\Drama\\media_catalog_5770_updated.csv',
+      rows: 5_770,
+      invalid: 0,
+      problems: [],
+      error: null,
+    };
+    const NONE = { lowConfidence: false, flagged: false, unclear: false };
+    const catalogue: TagImportSource = {
+      token: 'token-cat',
+      kind: 'catalogue',
+      name: 'media_catalog_5770_updated.csv',
+      exportedAt: '2026-10-18T12:00:00.000Z',
+      platform: null,
+      files: 5_003,
+      tags: 66,
+      invalid: 0,
+      problems: [],
+      tagStudio: null,
+      catalogue: {
+        filters: NONE,
+        rows: 5_770,
+        matching: { lowConfidence: 35, flagged: 757, unclear: 34 },
+        leftOut: 767,
+        renamed: 0,
+        formatsWithoutTag: 790,
+        filesWithoutFormat: 700,
+        formatItems: [
+          { name: 'phone video', files: 133 },
+          { name: 'subtitles', files: 41 },
+        ],
+      },
+    };
+    const cataloguePreview: TagImportPreview = {
+      ...restore,
+      planId: 9,
+      found: { samePlace: 4_990, moved: 10, shared: 0 },
+      notFound: { missing: 0, uncompared: 0, folder: 0, ambiguous: 0, notMedia: 0, notFound: 3 },
+      folders: [
+        {
+          exported: 'D:\\Drama\\!Unsorted\\2026-10',
+          files: 5_003,
+          found: 5_000,
+          foundIn: ['D:\\Drama'],
+          inLibrary: false,
+          suspicious: false,
+          addable: false,
+        },
+      ],
+      movedItems: [],
+      missedItems: [],
+      additions: { assignments: 5_017, files: 5_000, newTags: 0 },
+      additionsWithChanged: { assignments: 5_017, files: 5_000, newTags: 0 },
+      definitions: { ...noDefinitions, created: 64, links: 45 },
+    };
+
+    /** The catalogue chosen in Settings is `shown`. */
+    const choose = async (shown: CatalogueStatus | null): Promise<void> => {
+      worker.respond('getCatalogue', () => shown);
+      worker.emit('catalogueChanged', null);
+      await render();
+    };
+    const checkbox = (label: string): HTMLInputElement | undefined =>
+      [...host.querySelectorAll<HTMLLabelElement>('.filters label')]
+        .find((each) => text(each) === label)
+        ?.querySelector('input') ?? undefined;
+
+    it('offers to import from a catalogue once one is chosen and can be read', async () => {
+      const importButton = (): HTMLButtonElement | undefined => button('Import from catalogue…');
+      expect(importButton()?.getAttribute('aria-disabled')).toBe('true');
+      expect(
+        text(host.querySelector(`#${importButton()?.getAttribute('aria-describedby') ?? ''}`)),
+      ).toBe(
+        'To import from a classification catalogue, choose one under Classification catalogue below.',
+      );
+      importButton()?.click();
+      await render();
+      expect(worker.callsTo('openCatalogueImport')).toEqual([]);
+
+      await choose({ ...chosen, rows: 0, error: 'Cannot read the catalogue.' });
+      expect(importButton()?.getAttribute('aria-disabled')).toBe('true');
+
+      await choose(chosen);
+      expect(importButton()?.getAttribute('aria-disabled')).toBeNull();
+      expect(importButton()?.getAttribute('aria-describedby')).toBeNull();
+    });
+
+    it('previews a catalogue in its own words, and includes other rows when asked', async () => {
+      await choose(chosen);
+      worker.respond('openCatalogueImport', (filters) => ({
+        ...catalogue,
+        catalogue: { ...(catalogue.catalogue as CatalogueImportDetails), filters },
+      }));
+      worker.respond('planTagImport', () => cataloguePreview);
+
+      button('Import from catalogue…')?.click();
+      await render();
+
+      expect(worker.callsTo('openCatalogueImport')).toEqual([[NONE]]);
+      expect(worker.callsTo('planTagImport')).toEqual([['token-cat']]);
+      const shown = host.querySelector('app-tag-import-preview');
+      expect(text(shown?.querySelector('h3'))).toBe(
+        'Import tags from the classification catalogue “media_catalog_5770_updated.csv”?',
+      );
+      expect(text(shown?.querySelector('.about'))).toBe(
+        'Last changed on October 18, 2026 · 5,003 classified files · 66 tags',
+      );
+      expect(text(shown?.querySelector('.filters legend'))).toBe(
+        '767 of the 5,770 rows are left out:',
+      );
+      expect(
+        [...(shown?.querySelectorAll('.filters label') ?? [])].map((label) => text(label)),
+      ).toEqual([
+        'Include the 35 rows of low confidence',
+        'Include the 757 rows flagged for further review',
+        'Include the 34 rows whose subject is unclear (Needs context or audio review)',
+      ]);
+      const shownText = text(shown);
+      expect(shownText).toContain(
+        '10 moved since they were classified, recognised by their name, size and date',
+      );
+      expect(shownText).toContain('Folder of the catalogue');
+      expect(shownText).toContain(
+        '790 format tags, on 700 files, are left out: no tag has their name. Make a tag of one, or an alias of a tag, and import again to add it.',
+      );
+      expect(
+        [...(shown?.querySelectorAll('[aria-label="Format tags left out"] li') ?? [])].map((item) =>
+          text(item),
+        ),
+      ).toEqual(['phone video · 133 files', 'subtitles · 41 files', '… and 788 more']);
+
+      const low = checkbox('Include the 35 rows of low confidence');
+      if (low) {
+        low.checked = true;
+        low.dispatchEvent(new Event('change'));
+      }
+      await render();
+
+      expect(worker.callsTo('openCatalogueImport')).toEqual([
+        [NONE],
+        [{ ...NONE, lowConfidence: true }],
+      ]);
+      expect(checkbox('Include the 35 rows of low confidence')?.checked).toBe(true);
+    });
+
+    it('says how an import from a catalogue ended, in its own words', async () => {
+      await choose(chosen);
+      worker.respond('openCatalogueImport', () => catalogue);
+      worker.respond('planTagImport', () => cataloguePreview);
+      worker.respond('applyTagImport', () => ({
+        assignments: 5_017,
+        files: 5_000,
+        newTags: 0,
+        skipped: 2,
+        notFound: 3,
+        definitions: { created: 64, aliases: 0, links: 45, skipped: 0 },
+      }));
+      button('Import from catalogue…')?.click();
+      await render();
+
+      button('Import tags')?.click();
+      await render();
+
+      const outcome = text(host.querySelector('.outcome'));
+      expect(outcome).toContain(
+        '3 files of the catalogue were not found, or are not images or videos, so their tags were not imported. Import from the catalogue again',
+      );
+      expect(outcome).toContain('import from the catalogue again to include them.');
+      expect(document.activeElement).toBe(button('Import from catalogue…'));
+    });
+  });
+
   describe('from TagStudio', () => {
     const library: TagImportSource = {
       token: 'token-ts',
@@ -1371,6 +1554,7 @@ describe('TagTransfer', () => {
       tags: 296,
       invalid: 0,
       problems: [],
+      catalogue: null,
       tagStudio: {
         version: 102,
         renamed: 1,

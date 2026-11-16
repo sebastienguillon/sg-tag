@@ -18,6 +18,7 @@ import type { LibraryRoot, TagExportResult } from '@shared/model';
 import { DESKTOP } from '../core/desktop';
 import { WorkerClient } from '../core/worker-client';
 import { Icon } from '../ui/icon/icon';
+import { CatalogueSettings } from './catalogue/catalogue-settings';
 import { FfmpegUpdate } from './ffmpeg-update/ffmpeg-update';
 import { MediaTool } from './media-tool/media-tool';
 import { TagTransfer } from './tag-transfer/tag-transfer';
@@ -25,7 +26,7 @@ import { TagTransferStore } from './tag-transfer/tag-transfer-store';
 
 @Component({
   selector: 'app-settings-page',
-  imports: [Icon, RouterLink, DecimalPipe, FfmpegUpdate, MediaTool, TagTransfer],
+  imports: [Icon, RouterLink, DecimalPipe, CatalogueSettings, FfmpegUpdate, MediaTool, TagTransfer],
   templateUrl: './settings-page.html',
   styleUrl: './settings-page.css',
 })

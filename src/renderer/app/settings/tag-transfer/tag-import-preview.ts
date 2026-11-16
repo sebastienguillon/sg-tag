@@ -10,6 +10,8 @@ import {
 } from '@angular/core';
 import type { ElementRef } from '@angular/core';
 import type {
+  CatalogueFilters,
+  CatalogueImportDetails,
   TagImportMissReason,
   TagImportPreview as Preview,
   TagImportSkip,
@@ -88,6 +90,40 @@ function leftOutLines(leftOut: TagStudioLeftOut, locale: string): string[] {
   return lines;
 }
 
+/** A kind of rows of a classification catalogue that its import may leave out, as a checkbox. */
+interface FilterChoice {
+  readonly key: keyof CatalogueFilters;
+  readonly label: string;
+}
+
+/** The kinds of rows a catalogue has, each as its checkbox says it. */
+function filterChoicesOf(details: CatalogueImportDetails, locale: string): FilterChoice[] {
+  const rows = (count: number): string => counted(count, 'row', 'rows', locale);
+  const { matching } = details;
+  const choices: FilterChoice[] = [];
+  if (matching.lowConfidence > 0) {
+    choices.push({
+      key: 'lowConfidence',
+      label: `Include the ${rows(matching.lowConfidence)} of low confidence`,
+    });
+  }
+  if (matching.flagged > 0) {
+    choices.push({
+      key: 'flagged',
+      label: `Include the ${rows(matching.flagged)} flagged for further review`,
+    });
+  }
+  if (matching.unclear > 0) {
+    choices.push({
+      key: 'unclear',
+      label:
+        `Include the ${rows(matching.unclear)} whose subject is unclear ` +
+        '(Needs context or audio review)',
+    });
+  }
+  return choices;
+}
+
 /** An alias or a parent tag that importing leaves out, and why, in words. */
 interface SkipLine {
   readonly what: string;
@@ -149,9 +185,27 @@ export class TagImportPreview {
   protected readonly summaryId = `tag-import-summary-${nextId++}`;
   /** What is said of a TagStudio library: `null` for a tags export. */
   protected readonly tagStudio = computed(() => this.source().tagStudio);
+  /** What is said of a classification catalogue: `null` for anything else. */
+  protected readonly catalogue = computed(() => this.source().catalogue);
+  /** The rows of the catalogue that the import may leave out, each as a checkbox. */
+  protected readonly filterChoices = computed(() => {
+    const details = this.catalogue();
+    return details === null ? [] : filterChoicesOf(details, this.locale);
+  });
+  /** The files of a catalogue are on this computer, as those of a TagStudio library are. */
   protected readonly reasonLabels = computed(() =>
-    this.source().kind === 'tagStudio' ? TAGSTUDIO_REASON_LABELS : REASON_LABELS,
+    this.source().kind === 'tags' ? REASON_LABELS : TAGSTUDIO_REASON_LABELS,
   );
+  protected readonly foldersHeading = computed(() => {
+    switch (this.source().kind) {
+      case 'tagStudio':
+        return 'Folder of the TagStudio library';
+      case 'catalogue':
+        return 'Folder of the catalogue';
+      case 'tags':
+        return 'Library folders in the tags export';
+    }
+  });
   /** What a TagStudio library holds that does not come over, in words. */
   protected readonly leftOut = computed(() => {
     const details = this.tagStudio();
@@ -254,6 +308,19 @@ export class TagImportPreview {
     if (!this.locked()) {
       void this.store.check();
     }
+  }
+
+  /** Includes the rows of `key`, or leaves them out: the catalogue is previewed again. */
+  protected setFilter(key: keyof CatalogueFilters, included: boolean): void {
+    const details = this.catalogue();
+    if (details !== null && !this.locked()) {
+      void this.store.filterCatalogue({ ...details.filters, [key]: included });
+    }
+  }
+
+  /** `1 file`, `3,410 files`. */
+  protected fileCount(count: number): string {
+    return counted(count, 'file', 'files', this.locale);
   }
 
   protected async addFolder(path: string): Promise<void> {

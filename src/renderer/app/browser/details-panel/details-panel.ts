@@ -24,6 +24,7 @@ import { DurationPipe } from '../../ui/format/duration-pipe';
 import { FileSizePipe } from '../../ui/format/file-size-pipe';
 import { quote } from '../../ui/format/quote';
 import { Icon } from '../../ui/icon/icon';
+import { Classification } from '../classification/classification';
 import { TagEditor } from '../tag-editor/tag-editor';
 import { TagInput } from '../tag-input/tag-input';
 import { VideoPreview } from '../video-preview/video-preview';
@@ -58,7 +59,16 @@ function countStaying(group: readonly FileCopy[], id: number): number {
 /** Sidebar: metadata of the selected file, and tag editing for one or many files. */
 @Component({
   selector: 'app-details-panel',
-  imports: [Icon, TagInput, TagEditor, VideoPreview, DatePipe, FileSizePipe, DurationPipe],
+  imports: [
+    Icon,
+    TagInput,
+    TagEditor,
+    Classification,
+    VideoPreview,
+    DatePipe,
+    FileSizePipe,
+    DurationPipe,
+  ],
   templateUrl: './details-panel.html',
   styleUrl: './details-panel.css',
   // Takes the focus when the control holding it goes away, such as a file moved to the Trash.

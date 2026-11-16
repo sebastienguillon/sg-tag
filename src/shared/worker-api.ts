@@ -1,4 +1,7 @@
 import type {
+  CatalogueEntry,
+  CatalogueFilters,
+  CatalogueStatus,
   Diagnostics,
   FileDetails,
   FileSummary,
@@ -113,6 +116,30 @@ export interface LibraryApi {
   ) => TagImportResult;
   /** Stops reading or matching a tags export and forgets it; an import being applied finishes. */
   readonly closeTagImport: () => void;
+  /**
+   * The classification catalogue chosen (`WorkerHostApi.openCatalogue`), read again first if it
+   * changed on disk; `null` when none is chosen.
+   */
+  readonly getCatalogue: () => CatalogueStatus | null;
+  /** Stops using the classification catalogue. The tags it gave stay. */
+  readonly forgetCatalogue: () => void;
+  /**
+   * What the classification catalogue says of file `id`, and which of the tags it suggests the file
+   * has; `null` when no catalogue is chosen or it does not list the file.
+   */
+  readonly getCatalogueEntry: (id: number) => CatalogueEntry | null;
+  /**
+   * Gives file `id` the tags among `names` that the classification catalogue suggests for it; other
+   * names are passed over. The subcategory comes with its category as its parent tag, as an import
+   * of the catalogue gives it. Answers for each name added, as `addTags` does.
+   */
+  readonly addCatalogueTags: (id: number, names: readonly string[]) => readonly TagAddOutcome[];
+  /**
+   * Opens the classification catalogue chosen for import, its rows left out as `filters` say, and
+   * keeps it for `planTagImport`, replacing any tags export or library open. Throws, saying why,
+   * when none can be read.
+   */
+  readonly openCatalogueImport: (filters: CatalogueFilters) => TagImportSource;
 }
 
 export interface LibraryEvents {
@@ -129,6 +156,8 @@ export interface LibraryEvents {
    */
   readonly tagDefinitionsChanged: null;
   readonly rootsChanged: null;
+  /** A classification catalogue was chosen or forgotten, or the one chosen was read again. */
+  readonly catalogueChanged: null;
 }
 
 /** Where the main process should get a thumbnail from. */
@@ -173,6 +202,12 @@ export interface WorkerHostApi {
    * library open. Throws, saying why, when it cannot be imported.
    */
   readonly openTagStudioImport: (folder: string) => TagImportSource;
+  /**
+   * Reads the classification catalogue at `filePath`, a CSV file the user chose in an open dialog,
+   * and uses it from then on instead of any other. Throws, saying why, when it cannot be used: the
+   * catalogue chosen before then stays.
+   */
+  readonly openCatalogue: (filePath: string) => CatalogueStatus;
   readonly shutdown: () => void;
 }
 

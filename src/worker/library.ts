@@ -1,11 +1,19 @@
 import { createLogger } from '@shared/log';
-import type { Diagnostics, FileCopy, IndexStatus, LibraryRoot, TagEditResult } from '@shared/model';
+import type {
+  Diagnostics,
+  FileCopy,
+  IndexStatus,
+  LibraryRoot,
+  TagAddOutcome,
+  TagEditResult,
+} from '@shared/model';
 import type { Channel, RpcHandlers } from '@shared/rpc';
 import { errorMessage, RpcServer } from '@shared/rpc';
 import type { LibraryApi, LibraryEvents, WorkerHostApi } from '@shared/worker-api';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { CatalogueService, subjectDefinitions } from './catalogue/catalogue-service';
 import type { Db } from './database/database';
 import { openDatabase } from './database/database';
 import { DuplicateFinder } from './duplicates/duplicate-finder';
@@ -47,6 +55,10 @@ const MAX_CHANGED_IDS = 5_000;
  * import applied.
  */
 const BUSY = { ok: false, error: { kind: 'busy' } } as const satisfies TagEditResult;
+/** Why the tags of a classification catalogue cannot be added while tags are transferred. */
+const CATALOGUE_WHILE_TRANSFERRING =
+  'Tags are being exported or imported: add these once that is done.';
+const NO_CATALOGUE = 'No classification catalogue can be read: choose one in Settings.';
 
 /** The indexer worker's services, exposed to the renderer (`LibraryApi`) and the main process. */
 export class Library {
@@ -59,21 +71,7 @@ export class Library {
     },
     getSelectionTags: (ids) => this.tags.forSelection(ids),
     listTags: () => this.tags.list(),
-    addTags: (fileIds, names) => {
-      const outcomes = this.tags.addToFiles(fileIds, names);
-      // Only when nothing was added can a name have made a tag for no file: none of the files
-      // exists any more, forgotten a moment before. Such a tag does not stay.
-      if (!outcomes.some((outcome) => outcome.status === 'added')) {
-        this.tags.cleanup();
-      }
-      this.broadcast('tagsChanged', null);
-      this.fingerprinter.prioritize(fileIds);
-      // Tagging a file is a good time to find out it has a copy; usually no file has its size.
-      this.duplicates.check(fileIds).catch((error: unknown) => {
-        log.warn('Duplicate check failed:', errorMessage(error));
-      });
-      return outcomes;
-    },
+    addTags: (fileIds, names) => this.tagFiles(fileIds, names),
     removeTags: (fileIds, tagIds) => {
       this.tags.removeFromFiles(fileIds, tagIds);
       this.broadcast('tagsChanged', null);
@@ -185,6 +183,39 @@ export class Library {
     closeTagImport: () => {
       this.importer.close();
     },
+    getCatalogue: () => this.catalogue.status(),
+    forgetCatalogue: () => {
+      this.catalogue.forget();
+    },
+    getCatalogueEntry: (id) => this.catalogue.entryFor(id),
+    addCatalogueTags: async (id, names) => {
+      const located = await this.catalogue.rowFor(id);
+      if (located === null) {
+        return [];
+      }
+      const { row } = located;
+      const suggested = new Set([row.subcategory, ...row.formats]);
+      const wanted = names.filter((name) => suggested.has(name));
+      let defined = false;
+      if (wanted.includes(row.subcategory)) {
+        // As for a change to the definition of tags: a tag must stand for the same thing in all
+        // the steps of a tags transfer.
+        if (this.transferringTags) {
+          throw new Error(CATALOGUE_WHILE_TRANSFERRING);
+        }
+        const applied = this.tags.applyDefinitions(subjectDefinitions(row), false);
+        defined = applied.created.length + applied.aliases.length + applied.links.length > 0;
+      }
+      return wanted.length === 0 ? [] : this.tagFiles([id], wanted, defined);
+    },
+    openCatalogueImport: async (filters) => {
+      this.refuseImportWhileExporting();
+      const catalogue = await this.catalogue.current();
+      if (catalogue === null) {
+        throw new Error(NO_CATALOGUE);
+      }
+      return this.importer.openCatalogue(catalogue, filters);
+    },
   };
 
   readonly hostHandlers: RpcHandlers<WorkerHostApi> = {
@@ -221,6 +252,7 @@ export class Library {
       this.refuseImportWhileExporting();
       return this.importer.openTagStudio(folder);
     },
+    openCatalogue: (filePath) => this.catalogue.choose(filePath),
     shutdown: () => this.stop(),
   };
 
@@ -238,6 +270,7 @@ export class Library {
   private readonly trash: TrashGuard;
   private readonly exporter: TagExporter;
   private readonly importer: TagImporter;
+  private readonly catalogue: CatalogueService;
   private readonly tools: MediaTools;
   private readonly renderers = new Set<RpcServer<LibraryApi, LibraryEvents>>();
   private readonly changedIds = new Set<number>();
@@ -346,6 +379,15 @@ export class Library {
       },
       copiesDir: path.join(config.dataDir, 'imports'),
     });
+    this.catalogue = new CatalogueService({
+      files: this.files,
+      roots: this.roots,
+      tags: this.tags,
+      settings: this.settings,
+      onChanged: () => {
+        this.broadcast('catalogueChanged', null);
+      },
+    });
     if (this.tools.ffmpeg === null) {
       log.warn('ffmpeg not found: video thumbnails fall back to the OS thumbnailer, if any.');
     }
@@ -358,6 +400,10 @@ export class Library {
     });
     this.thumbnails.startBackground();
     this.fingerprinter.startBackground();
+    // Not waited for: the library is served meanwhile, and asking for the catalogue waits for it.
+    this.catalogue.start().catch((error: unknown) => {
+      log.warn('Cannot read the classification catalogue:', errorMessage(error));
+    });
   }
 
   async stop(): Promise<void> {
@@ -515,6 +561,33 @@ export class Library {
       this.broadcast('tagDefinitionsChanged', null);
     }
     return result;
+  }
+
+  /**
+   * Tags `fileIds` with each of `names` (`TagsRepository.addToFiles`) and tells renderers: with
+   * `defined`, the definition of tags changed too.
+   */
+  private tagFiles(
+    fileIds: readonly number[],
+    names: readonly string[],
+    defined = false,
+  ): TagAddOutcome[] {
+    const outcomes = this.tags.addToFiles(fileIds, names);
+    // Only when nothing was added can a name have made a tag for no file: none of the files
+    // exists any more, forgotten a moment before. Such a tag does not stay.
+    if (!outcomes.some((outcome) => outcome.status === 'added')) {
+      this.tags.cleanup();
+    }
+    this.broadcast('tagsChanged', null);
+    if (defined) {
+      this.broadcast('tagDefinitionsChanged', null);
+    }
+    this.fingerprinter.prioritize(fileIds);
+    // Tagging a file is a good time to find out it has a copy; usually no file has its size.
+    this.duplicates.check(fileIds).catch((error: unknown) => {
+      log.warn('Duplicate check failed:', errorMessage(error));
+    });
+    return outcomes;
   }
 
   private describeRoot(root: RootRecord): LibraryRoot {

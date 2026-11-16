@@ -1,0 +1,66 @@
+:host {
+  display: block;
+}
+
+p {
+  margin: 0;
+}
+
+.lead {
+  margin-bottom: 16px;
+  color: var(--text-muted);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  margin: 0 0 8px;
+}
+
+dt {
+  color: var(--text-muted);
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.counts,
+.warning {
+  margin-bottom: 8px;
+}
+
+.counts,
+.problems {
+  color: var(--text-muted);
+}
+
+.warning {
+  color: var(--warning);
+}
+
+.problems {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.error {
+  margin-top: 12px;
+  color: var(--danger);
+}

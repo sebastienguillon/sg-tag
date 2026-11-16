@@ -15,6 +15,7 @@ const EVENT_NAMES = Object.keys({
   tagsChanged: true,
   tagDefinitionsChanged: true,
   rootsChanged: true,
+  catalogueChanged: true,
 } satisfies Record<keyof LibraryEvents, true>) as (keyof LibraryEvents)[];
 
 /**

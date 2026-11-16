@@ -93,7 +93,8 @@ Four commitments define SG Tag, and future work must not trade any of them away:
 - Zoom: ⌘/Ctrl with `+` or `=`, `-` and `0` (keypad too, on any keyboard layout), Ctrl + mouse wheel
   on Windows and Linux, or the View menu; 50% to 300%, remembered across launches.
 - Settings: library folders (add, remove, file and tagged counts, offline state), tags (data folder,
-  Export tags…, Import tags… and Import from TagStudio…), and diagnostics (versions of the app, ffmpeg, ffprobe and SQLite).
+  Export tags…, Import tags…, Import from TagStudio… and Import from catalogue…), the
+  classification catalogue, and diagnostics (versions of the app, ffmpeg, ffprobe and SQLite).
   One Check for updates covers ffmpeg and ffprobe, which come with the same FFmpeg release: it asks
   ffmpeg.org for its latest release and links to its download page when that is newer. SG Tag
   contacts no website otherwise. A tool not found gets a link to install FFmpeg.
@@ -118,8 +119,21 @@ Four commitments define SG Tag, and future work must not trade any of them away:
   as the one file of their name there. Names a tag cannot have here are rewritten, tags of one name
   with other parent tags become `Name (Parent)`, and the preview lists both, and counts what does
   not come over (colours, icons, categories, the hidden setting, fields, unused built-in tags).
+- Classification catalogue (experimental): SG Tag reads the catalogue that the
+  `media-classification` skill writes (a CSV file, chosen in Settings and remembered, read again
+  when it changes, never written). For one selected file, the details panel shows its category and
+  subcategory, confidence, topic, visible content and review notes, and suggests its tags: the
+  subcategory, below its category as a parent tag, and its format tags, each added on its own or
+  all at once. A file is the one at the catalogue's path, or, after a move, the one file in the
+  library folders with its name, size and date; one that changed since it was classified says so.
+  Import from catalogue… gives every file it lists its subcategory, with the same preview and the
+  same only-adds guarantee as a tags export. It leaves out rows of low confidence, rows flagged for
+  further review and the category "Needs context or audio review" unless asked, and gives a format
+  tag only when a tag (or an alias) already has its name: it never makes one, and its preview
+  lists the most frequent left out.
 - Terminology: _library folders_ (the roots the user adds), _data folder_, _tags_, _tags export_,
-  _selection_, _details panel_, _tags page_, _missing_ and _offline_ files, _indexing_.
+  _selection_, _details panel_, _tags page_, _missing_ and _offline_ files, _indexing_,
+  _classification catalogue_ (then _catalogue_), _category_, _subcategory_, _format tags_.
 - Heavy work (indexing, watching, thumbnails, database) runs in a separate indexer process, never
   in the interface.
 - License: MIT, for the app's own code. Installers also ship LGPL components (libvips inside

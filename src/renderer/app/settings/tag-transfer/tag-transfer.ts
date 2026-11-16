@@ -13,6 +13,7 @@ import {
   viewChild,
 } from '@angular/core';
 import type { TagImportKind } from '@shared/model';
+import { CatalogueStore } from '../../core/catalogue-store';
 import { TagsStore } from '../../core/tags-store';
 import { Icon } from '../../ui/icon/icon';
 import { TagImportPreview } from './tag-import-preview';
@@ -21,6 +22,20 @@ import type { ImportState } from './tag-transfer-store';
 import { TagTransferStore } from './tag-transfer-store';
 
 let nextId = 0;
+
+/** What each kind of import is called where a sentence names it. */
+const SOURCE_WORDS: Readonly<Record<TagImportKind, string>> = {
+  tags: 'tags export',
+  tagStudio: 'TagStudio library',
+  catalogue: 'catalogue',
+};
+
+/** What a sentence asks to import again, after `import`. */
+const AGAIN_WORDS: Readonly<Record<TagImportKind, string>> = {
+  tags: 'the tags export',
+  tagStudio: 'from TagStudio',
+  catalogue: 'from the catalogue',
+};
 
 /** The Tags section of Settings: where tags are kept, exporting them, and importing a tags export. */
 @Component({
@@ -33,6 +48,7 @@ let nextId = 0;
 export class TagTransfer {
   protected readonly store = inject(TagTransferStore);
   private readonly tagsStore = inject(TagsStore);
+  private readonly catalogues = inject(CatalogueStore);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly document = inject(DOCUMENT);
   private readonly locale = inject(LOCALE_ID);
@@ -46,6 +62,8 @@ export class TagTransfer {
   private readonly importButton = viewChild.required<ElementRef<HTMLButtonElement>>('importButton');
   private readonly tagStudioButton =
     viewChild.required<ElementRef<HTMLButtonElement>>('tagStudioButton');
+  private readonly catalogueButton =
+    viewChild.required<ElementRef<HTMLButtonElement>>('catalogueButton');
   private readonly preview = viewChild(TagImportPreview);
 
   protected readonly tagCount = computed(() => this.tagsStore.tags().length);
@@ -77,18 +95,32 @@ export class TagTransfer {
     return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
   });
   /** Ties Export tags… to the reason it cannot export. */
-  protected readonly hintId = `export-hint-${nextId++}`;
-  /** The import shown is from a TagStudio library, not a tags export. */
-  protected readonly fromTagStudio = computed(() => {
+  protected readonly hintId = `export-hint-${nextId}`;
+  /** Ties Import from catalogue… to the reason it cannot import. */
+  protected readonly catalogueHintId = `catalogue-hint-${nextId++}`;
+  /** Why Import from catalogue… cannot import. */
+  protected readonly catalogueHint =
+    'To import from a classification catalogue, choose one under Classification catalogue below.';
+  /** What the import shown is from: a tags export, a TagStudio library or a catalogue. */
+  protected readonly importKind = computed((): TagImportKind => {
     const state = this.store.importState();
     switch (state.step) {
       case 'idle':
-        return false;
+        return 'tags';
       case 'opening':
-        return state.kind === 'tagStudio';
+        return state.kind;
       default:
-        return state.source?.kind === 'tagStudio';
+        return state.source?.kind ?? 'tags';
     }
+  });
+  /** What the import shown is from, as a sentence names it: `the {{ sourceWords }}`. */
+  protected readonly sourceWords = computed(() => SOURCE_WORDS[this.importKind()]);
+  /** What a sentence asks to import again, after `import`. */
+  protected readonly againWords = computed(() => AGAIN_WORDS[this.importKind()]);
+  /** A classification catalogue is chosen, and can be read. */
+  protected readonly canImportCatalogue = computed(() => {
+    const status = this.catalogues.status.hasValue() ? this.catalogues.status.value() : null;
+    return status !== null && status.error === null;
   });
   /** What was last imported from: its button gets the focus back. */
   private lastKind: TagImportKind = 'tags';
@@ -127,6 +159,12 @@ export class TagTransfer {
   protected open(kind: TagImportKind): void {
     this.lastKind = kind;
     void this.store.open(kind);
+  }
+
+  protected openCatalogue(): void {
+    if (this.canImportCatalogue()) {
+      this.open('catalogue');
+    }
   }
 
   protected check(): void {
@@ -191,9 +229,13 @@ export class TagTransfer {
     }
   }
 
-  /** Import tags… or Import from TagStudio…, whichever was used last. */
+  /** Import tags…, Import from TagStudio… or Import from catalogue…, whichever was used last. */
   private openButton(): HTMLButtonElement {
-    return (this.lastKind === 'tagStudio' ? this.tagStudioButton() : this.importButton())
-      .nativeElement;
+    const buttons: Readonly<Record<TagImportKind, () => ElementRef<HTMLButtonElement>>> = {
+      tags: this.importButton,
+      tagStudio: this.tagStudioButton,
+      catalogue: this.catalogueButton,
+    };
+    return buttons[this.lastKind]().nativeElement;
   }
 }

@@ -1,0 +1,95 @@
+@if (entry(); as entry) {
+  <section [attr.aria-labelledby]="headingId">
+    <h3 [id]="headingId">Classification</h3>
+    <p class="subject">
+      {{ entry.category }} › <strong>{{ entry.subcategory }}</strong>
+    </p>
+    @if (entry.found === 'changed') {
+      <p class="notice">
+        <app-icon name="alert" />
+        <span>
+          This file changed since it was classified: what the catalogue says may no longer hold.
+        </span>
+      </p>
+    } @else if (entry.found === 'moved') {
+      <p class="notice">
+        <app-icon name="folder-open" />
+        <span>
+          Classified at
+          <span class="path">{{ entry.classifiedPath }}</span>
+        </span>
+      </p>
+    }
+    @if (entry.flagged) {
+      <div class="notice">
+        <app-icon name="alert" />
+        <div>
+          <p>Flagged for further review{{ reviewStatusOf(entry) }}</p>
+          @if (entry.reviewReasons.length > 0) {
+            <ul class="reasons">
+              @for (reason of entry.reviewReasons; track $index) {
+                <li>{{ reason }}</li>
+              }
+            </ul>
+          }
+        </div>
+      </div>
+    }
+    <dl class="meta">
+      @if (entry.confidence !== null) {
+        <dt>Confidence</dt>
+        <dd>{{ entry.confidence }}</dd>
+      }
+      @if (entry.topic !== null) {
+        <dt>Topic</dt>
+        <dd>{{ entry.topic }}</dd>
+      }
+      @if (entry.visibleContent !== null) {
+        <dt>Visible content</dt>
+        <dd>{{ entry.visibleContent }}</dd>
+      }
+      @if (entry.reviewNotes !== null) {
+        <dt>Review notes</dt>
+        <dd>{{ entry.reviewNotes }}</dd>
+      }
+    </dl>
+
+    <h4>Suggested tags</h4>
+    <ul class="suggestions">
+      @for (suggestion of entry.suggestions; track suggestion.name) {
+        <li>
+          <button
+            type="button"
+            class="suggestion"
+            [class.added]="suggestion.added"
+            [attr.aria-disabled]="suggestion.added ? 'true' : null"
+            [title]="suggestion.added ? 'Already added' : `Add tag ${suggestion.name}`"
+            (click)="add(suggestion.added ? [] : [suggestion.name])"
+          >
+            <app-icon [name]="suggestion.added ? 'check' : 'plus'" />
+            {{ suggestion.name }}
+            @if (suggestion.added) {
+              <span class="visually-hidden">(added)</span>
+            }
+          </button>
+          @if (suggestion.kind === 'subject') {
+            <span class="parent">in {{ entry.category }}</span>
+          }
+        </li>
+      }
+    </ul>
+    <div class="actions">
+      <button
+        type="button"
+        class="button"
+        [attr.aria-disabled]="missing().length === 0 ? 'true' : null"
+        (click)="add(missing())"
+      >
+        <app-icon name="tag" /> Add all
+      </button>
+    </div>
+    @if (error(); as message) {
+      <p class="error" role="alert">{{ message }}</p>
+    }
+  </section>
+}

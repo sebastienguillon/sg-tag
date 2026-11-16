@@ -15,6 +15,7 @@ export type IconName =
   | 'alert'
   | 'hard-drive'
   | 'plus'
+  | 'check'
   | 'loader'
   | 'sort-desc'
   | 'sort-asc'

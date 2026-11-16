@@ -131,6 +131,12 @@
     }
   </section>
 
+  @if (count() === 1 && !fileTrashed()) {
+    @if (file(); as file) {
+      <app-classification [fileId]="file.id" />
+    }
+  }
+
   @if (count() === 1) {
     @if (file(); as file) {
       @if (copies().length > 0 && !file.missing) {

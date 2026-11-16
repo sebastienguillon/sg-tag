@@ -36,6 +36,7 @@ const source: TagImportSource = {
   invalid: 0,
   problems: [],
   tagStudio: null,
+  catalogue: null,
 };
 
 /** A tags export that describes no tag: it adds no alias or parent tag. */
@@ -131,6 +132,7 @@ describe('StatusBar', () => {
     worker.respond('listTags', () => []);
     worker.respond('getLastTagExport', () => null);
     worker.respond('closeTagImport', () => undefined);
+    worker.respond('getCatalogue', () => null);
     exportTags = () => Promise.resolve(exported);
     bar = null;
     settings = null;

@@ -35,6 +35,7 @@ export function registerIpc(worker: WorkerHost, trustedOrigin: string, dataDir: 
   let exportFolder: string | undefined;
   let importFile: string | undefined;
   let tagStudioFolder: string | undefined;
+  let catalogueFile: string | undefined;
 
   ipcMain.on(IpcChannel.requestWorkerPort, (event) => {
     if (trusted(event)) {
@@ -156,6 +157,33 @@ export function registerIpc(worker: WorkerHost, trustedOrigin: string, dataDir: 
     const source = await worker.call('openTagStudioImport', folder);
     tagStudioFolder = folder;
     return source;
+  });
+
+  ipcMain.handle(IpcChannel.chooseCatalogue, async (event) => {
+    if (!trusted(event)) {
+      return null;
+    }
+    const options: Electron.OpenDialogOptions = {
+      title: 'Choose a classification catalogue',
+      buttonLabel: 'Choose',
+      defaultPath: catalogueFile ?? app.getPath('documents'),
+      filters: [
+        { name: 'Classification catalogues', extensions: ['csv'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    };
+    const owner = ownerOf(event);
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    const filePath = result.canceled ? undefined : result.filePaths[0];
+    if (filePath === undefined) {
+      return null;
+    }
+    // Next time, the dialog opens where this one was: a newer checkpoint sits beside it.
+    catalogueFile = filePath;
+    return worker.call('openCatalogue', filePath);
   });
 
   ipcMain.handle(IpcChannel.latestFfmpegRelease, (event) => {

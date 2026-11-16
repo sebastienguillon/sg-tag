@@ -1,4 +1,4 @@
-import type { TagExportResult, TagImportSource } from './model';
+import type { CatalogueStatus, TagExportResult, TagImportSource } from './model';
 
 /** API the preload script exposes to the renderer as `window.sgTag`. */
 export interface DesktopBridge {
@@ -22,6 +22,11 @@ export interface DesktopBridge {
    * Preview it with `LibraryApi.planTagImport`.
    */
   readonly openTagStudioImport: () => Promise<TagImportSource | null>;
+  /**
+   * Asks for a classification catalogue (a CSV file) and uses it from then on; `null` if canceled.
+   * Rejects, saying why, when the file cannot be used.
+   */
+  readonly chooseCatalogue: () => Promise<CatalogueStatus | null>;
   /** The newest FFmpeg release that ffmpeg.org lists, e.g. `9.0.2`; asks ffmpeg.org each time. */
   readonly latestFfmpegRelease: () => Promise<string>;
 }
@@ -36,6 +41,7 @@ export const IpcChannel = {
   exportTags: 'tags:export',
   openTagImport: 'tags:open-import',
   openTagStudioImport: 'tags:open-tagstudio-import',
+  chooseCatalogue: 'catalogue:choose',
   latestFfmpegRelease: 'updates:latest-ffmpeg',
 } as const;
 

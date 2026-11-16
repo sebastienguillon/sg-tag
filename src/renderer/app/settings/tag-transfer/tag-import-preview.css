@@ -83,16 +83,32 @@ summary {
   font-family: var(--font);
 }
 
-.changed label {
+.changed label,
+.filters label {
   display: flex;
   align-items: baseline;
   gap: 6px;
 }
 
 /* Locked, but still focusable: looks like a busy button. */
-.changed label:has(> input[aria-disabled='true']) {
+.changed label:has(> input[aria-disabled='true']),
+.filters label:has(> input[aria-disabled='true']) {
   opacity: 0.5;
   cursor: default;
+}
+
+/* The rows of a catalogue its import leaves out, each with a checkbox to include them. */
+.filters {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.filters legend {
+  margin-bottom: 4px;
+  padding: 0;
 }
 
 .folders {

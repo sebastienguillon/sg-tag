@@ -1,5 +1,6 @@
 import { createLogger } from '@shared/log';
 import type {
+  CatalogueFilters,
   TagDefinitionCounts,
   TagImportAdditions,
   TagImportDefinitions,
@@ -17,6 +18,10 @@ import { tagKey } from '@shared/tag-names';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import type { Catalogue } from '../catalogue/catalogue-file';
+import { catalogueImport } from '../catalogue/catalogue-import';
+import type { CataloguePlace } from '../catalogue/catalogue-locator';
+import { matchCatalogueEntries } from '../catalogue/catalogue-matcher';
 import { isDirectory } from '../indexer/crawler';
 import { fingerprint } from '../indexer/fingerprint';
 import type {
@@ -138,12 +143,22 @@ interface Plan {
   readonly targets: ReadonlyMap<number, Target>;
 }
 
-/** The open tags export, or TagStudio library. */
+/** The open tags export, TagStudio library or classification catalogue. */
 interface Session {
   readonly token: string;
-  /** How its files are found: by their content, or, in a TagStudio library, by their place. */
+  /**
+   * How its files are found: by their content, in a TagStudio library by their place, in a
+   * classification catalogue by their place, or their name, size and date (`places`).
+   */
   readonly kind: TagImportKind;
   readonly parsed: ParsedTagFile;
+  /** For a classification catalogue: where each entry's file was when it was classified. */
+  readonly places?: readonly CataloguePlace[];
+  /**
+   * The `tagKey` of the names that only name tags of the library: importing gives them to files
+   * but never makes them (the format tags of a classification catalogue).
+   */
+  readonly existingOnly?: ReadonlySet<string>;
   /** The latest preview; none while another is being made. */
   plan: Plan | null;
 }
@@ -246,6 +261,7 @@ export class TagImporter {
         invalid,
         problems,
         tagStudio: null,
+        catalogue: null,
       };
     } finally {
       this.settle(task);
@@ -290,10 +306,48 @@ export class TagImporter {
         invalid,
         problems,
         tagStudio: details,
+        catalogue: null,
       };
     } finally {
       this.settle(task);
     }
+  }
+
+  /**
+   * Opens `catalogue`, a classification catalogue already read, its rows left out as `filters`
+   * say, instead of any other tags export or library: each file kept gets its subcategory, made
+   * below its category, and those of its format tags that a tag of the library has as a name or an
+   * alias.
+   */
+  openCatalogue(catalogue: Catalogue, filters: CatalogueFilters): TagImportSource {
+    this.refuseWhileApplying();
+    this.close();
+    const { parsed, places, formats, details } = catalogueImport(
+      catalogue,
+      filters,
+      this.options.tags,
+    );
+    const { entries, tagCount, invalid, problems } = parsed;
+    log.info(
+      `Opened a classification catalogue of ${String(details.rows)} rows for import: ` +
+        `${String(entries.length)} kept, ${String(tagCount)} tags`,
+    );
+    const token = randomUUID();
+    this.session = { token, kind: 'catalogue', parsed, places, existingOnly: formats, plan: null };
+    return {
+      token,
+      kind: 'catalogue',
+      name: path.basename(catalogue.path),
+      exportedAt: parsed.header.exportedAt,
+      // Its files are on this computer.
+      platform: null,
+      files: entries.length,
+      tags: tagCount,
+      invalid,
+      problems,
+      tagStudio: null,
+      catalogue: details,
+    };
   }
 
   /**
@@ -317,26 +371,7 @@ export class TagImporter {
       const onProgress = (step: 'matching' | 'comparing', done: number, total: number): void => {
         this.report({ step, done, total });
       };
-      const match =
-        session.kind === 'tagStudio'
-          ? await matchTagStudioEntries(parsed, {
-              files: this.options.files,
-              roots,
-              caseInsensitive: this.caseInsensitive,
-              signal,
-              slicer,
-              onProgress,
-            })
-          : await matchEntries(parsed, {
-              files: this.options.files,
-              roots,
-              isOnline: this.options.isOnline,
-              caseInsensitive: this.caseInsensitive,
-              read: this.read,
-              signal,
-              slicer,
-              onProgress,
-            });
+      const match = await this.match(session, roots, signal, slicer, onProgress);
       const folders = await this.foldersOf(parsed, match, roots, signal);
       const { summary, found } = await summarize(parsed, match, slicer);
       if (slicer.due) {
@@ -364,6 +399,52 @@ export class TagImporter {
   }
 
   /**
+   * The file each entry of the open tags export, TagStudio library or classification catalogue is
+   * in this library, found as its kind allows.
+   */
+  private match(
+    session: Session,
+    roots: readonly RootRecord[],
+    signal: AbortSignal,
+    slicer: Slicer,
+    onProgress: (step: 'matching' | 'comparing', done: number, total: number) => void,
+  ): Promise<MatchResult> {
+    const { files } = this.options;
+    const insensitive = this.caseInsensitive;
+    switch (session.kind) {
+      case 'catalogue':
+        return matchCatalogueEntries(session.parsed, session.places ?? [], {
+          files,
+          roots,
+          caseInsensitive: insensitive,
+          signal,
+          slicer,
+          onProgress,
+        });
+      case 'tagStudio':
+        return matchTagStudioEntries(session.parsed, {
+          files,
+          roots,
+          caseInsensitive: insensitive,
+          signal,
+          slicer,
+          onProgress,
+        });
+      case 'tags':
+        return matchEntries(session.parsed, {
+          files,
+          roots,
+          isOnline: this.options.isOnline,
+          caseInsensitive: insensitive,
+          read: this.read,
+          signal,
+          slicer,
+          onProgress,
+        });
+    }
+  }
+
+  /**
    * Adds the tags of preview `planId`, with its changed files if `includeChanged`, then forgets the
    * tags export. Files that moved, changed, went missing from disk or left the library since the
    * preview are left out.
@@ -379,7 +460,12 @@ export class TagImporter {
     this.refuseWhileApplying();
     this.importing = true;
     try {
-      const result = await this.add(plan, includeChanged, session.parsed.definitions);
+      const result = await this.add(
+        plan,
+        includeChanged,
+        session.parsed.definitions,
+        session.existingOnly ?? new Set(),
+      );
       // Importing again means opening the tags export again.
       this.session = null;
       return result;
@@ -582,6 +668,7 @@ export class TagImporter {
     plan: Plan,
     includeChanged: boolean,
     definitions: readonly TagDefinition[],
+    existingOnly: ReadonlySet<string>,
   ): Promise<TagImportResult> {
     const started = performance.now();
     const defined = this.define(definitions, false);
@@ -603,7 +690,7 @@ export class TagImporter {
         const chunk = ids.slice(start, start + CHUNK_SIZE);
         // One transaction: no indexing can change these files between the check and the writes.
         const added = this.options.files.transaction(() =>
-          this.addChunk(plan, chunk, defined.named),
+          this.addChunk(plan, chunk, defined.named, existingOnly),
         );
         assignments += added.assignments;
         files += added.files;
@@ -636,12 +723,14 @@ export class TagImporter {
    * names of it were planned. Call within a transaction: nothing changes between the lookups and
    * the writes, and the library takes every name that a tags export is read with
    * (`normalizeTagName`), so each file gains exactly the tags it is found to lack, which are those
-   * counted.
+   * counted. A name of `existingOnly` that no longer names a tag (renamed or deleted since the
+   * preview) is passed over: no tag is made of it.
    */
   private addChunk(
     plan: Plan,
     ids: readonly number[],
     described: ReadonlyMap<string, NamedTag>,
+    existingOnly: ReadonlySet<string>,
   ): TagImportAdditions & { readonly alive: number[] } {
     const { files, tags } = this.options;
     const alive = files
@@ -666,7 +755,7 @@ export class TagImporter {
       let gained = 0;
       for (const name of names) {
         const tag = named.get(name) as NamedTag;
-        if (has.has(tag)) {
+        if (has.has(tag) || (typeof tag === 'string' && existingOnly.has(tag))) {
           continue;
         }
         has.add(tag);

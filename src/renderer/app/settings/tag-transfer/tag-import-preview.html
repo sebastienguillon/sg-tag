@@ -2,15 +2,18 @@
 @let plan = preview();
 @let defs = plan.definitions;
 @let studio = tagStudio();
+@let cat = catalogue();
 
 @if (studio) {
   <h3 [id]="headingId">Import tags from the TagStudio library “{{ file.name }}”?</h3>
+} @else if (cat) {
+  <h3 [id]="headingId">Import tags from the classification catalogue “{{ file.name }}”?</h3>
 } @else {
   <h3 [id]="headingId">Import tags from “{{ file.name }}”?</h3>
 }
 <p class="about">
-  @if (studio) {
-    <!-- When its database was last saved. -->
+  @if (studio || cat) {
+    <!-- When its database, or the catalogue, was last saved. -->
     @if (exportedAt(); as at) {
       Last changed on {{ at | date: 'longDate' }} ·
     }
@@ -24,7 +27,10 @@
     Exported from {{ computer }} ·
   }
   @if (file.files > 0) {
-    {{ file.files | number }} tagged file{{ file.files === 1 ? '' : 's' }} ·
+    {{ file.files | number }} {{ cat ? 'classified' : 'tagged' }} file{{
+      file.files === 1 ? '' : 's'
+    }}
+    ·
   }
   {{ file.tags | number }} tag{{ file.tags === 1 ? '' : 's' }}
 </p>
@@ -33,6 +39,8 @@
     Tags are added to files already in your library folders. No file is copied, moved or changed,
     and no tag is removed.
   </p>
+} @else if (cat) {
+  <p>The filters below leave out every row of this catalogue: there is nothing to import.</p>
 } @else {
   <!-- Nothing about files to say: the files paragraphs below have nothing to count. -->
   <p>
@@ -45,6 +53,8 @@
     {{ file.invalid | number }}
     @if (studio) {
       file{{ file.invalid === 1 ? '' : 's' }} of the TagStudio library
+    } @else if (cat) {
+      row{{ file.invalid === 1 ? '' : 's' }} of the catalogue
     } @else {
       line{{ file.invalid === 1 ? '' : 's' }} of the tags export
     }
@@ -55,13 +65,40 @@
     <ul
       class="paths"
       tabindex="0"
-      [attr.aria-label]="studio ? 'Files not read in full' : 'Lines not read in full'"
+      [attr.aria-label]="
+        studio ? 'Files not read in full' : cat ? 'Rows not read' : 'Lines not read in full'
+      "
     >
       @for (problem of file.problems; track $index) {
         <li>{{ problem }}</li>
       }
     </ul>
   </details>
+}
+
+@if (cat && filterChoices().length > 0) {
+  <fieldset class="filters">
+    <legend>
+      @if (cat.leftOut > 0) {
+        {{ cat.leftOut | number }} of the {{ cat.rows | number }} rows are left out:
+      } @else {
+        Rows included:
+      }
+    </legend>
+    @for (choice of filterChoices(); track choice.key) {
+      <label>
+        <input
+          #filter
+          type="checkbox"
+          [checked]="cat.filters[choice.key]"
+          [attr.aria-disabled]="locked() ? 'true' : null"
+          (click)="guardChanged($event)"
+          (change)="setFilter(choice.key, filter.checked)"
+        />
+        {{ choice.label }}
+      </label>
+    }
+  </fieldset>
 }
 
 @if (found() > 0) {
@@ -79,6 +116,10 @@
           {{ plan.found.moved | number }} moved since TagStudio last saw
           {{ plan.found.moved === 1 ? 'it' : 'them' }}, recognised by
           {{ plan.found.moved === 1 ? 'its' : 'their' }} name
+        } @else if (cat) {
+          {{ plan.found.moved | number }} moved since
+          {{ plan.found.moved === 1 ? 'it was' : 'they were' }} classified, recognised by
+          {{ plan.found.moved === 1 ? 'its' : 'their' }} name, size and date
         } @else {
           {{ plan.found.moved | number }} renamed or moved since the export, recognised by
           {{ plan.found.moved === 1 ? 'its' : 'their' }} content
@@ -105,6 +146,9 @@
         @if (studio) {
           {{ plan.found.shared | number }} files of the TagStudio library, whose names this computer
           takes as one, were found as one file here, which gets the tags of each
+        } @else if (cat) {
+          {{ plan.found.shared | number }} rows of the catalogue were found as the same file here,
+          which gets the tags of each
         } @else {
           {{ plan.found.shared | number }} identical
           {{ plan.found.shared === 1 ? 'copy' : 'copies' }} in the export
@@ -127,7 +171,12 @@
         (change)="includeChanged.set(changed.checked)"
       />
       Also tag the {{ plan.changed | number }} file{{ plan.changed === 1 ? '' : 's' }} at the same
-      place that changed since the export, or could not be compared
+      place that changed since
+      @if (cat) {
+        {{ plan.changed === 1 ? 'it was' : 'they were' }} classified
+      } @else {
+        the export, or could not be compared
+      }
     </label>
     <details>
       <summary>Show<span class="visually-hidden"> the files that changed</span></summary>
@@ -163,7 +212,7 @@
     }
     @if (plan.notFound.folder > 0) {
       <li>
-        @if (studio) {
+        @if (studio || cat) {
           {{ plan.notFound.folder | number }} {{ plan.notFound.folder === 1 ? 'is' : 'are' }}
           outside your library folders
         } @else {
@@ -210,7 +259,7 @@
 }
 
 @if (showFolders()) {
-  <h4>{{ studio ? 'Folder of the TagStudio library' : 'Library folders in the tags export' }}</h4>
+  <h4>{{ foldersHeading() }}</h4>
   <ul class="folders">
     @for (folder of plan.folders; track $index) {
       <li class="folder">
@@ -481,3 +530,40 @@
     </button>
   }
 </div>
+
+@if (cat && (cat.renamed > 0 || cat.formatsWithoutTag > 0)) {
+  <h4>From the catalogue</h4>
+  <ul class="counts">
+    @if (cat.formatsWithoutTag > 0) {
+      <li>
+        {{ cat.formatsWithoutTag | number }} format tag{{ cat.formatsWithoutTag === 1 ? '' : 's' }},
+        on {{ cat.filesWithoutFormat | number }} file{{ cat.filesWithoutFormat === 1 ? '' : 's' }},
+        {{ cat.formatsWithoutTag === 1 ? 'is' : 'are' }} left out: no tag has
+        {{ cat.formatsWithoutTag === 1 ? 'its' : 'their' }} name. Make a tag of one, or an alias of
+        a tag, and import again to add it.
+        <details>
+          <summary>Show the most frequent</summary>
+          <ul class="paths names" tabindex="0" aria-label="Format tags left out">
+            @for (item of cat.formatItems; track item.name) {
+              <li>
+                {{ item.name }}
+                <span class="reason">· {{ fileCount(item.files) }}</span>
+              </li>
+            }
+            @if (cat.formatsWithoutTag > cat.formatItems.length) {
+              <li class="more">
+                … and {{ cat.formatsWithoutTag - cat.formatItems.length | number }} more
+              </li>
+            }
+          </ul>
+        </details>
+      </li>
+    }
+    @if (cat.renamed > 0) {
+      <li>
+        {{ cat.renamed | number }} label{{ cat.renamed === 1 ? '' : 's' }} written otherwise, to be
+        a tag name: a comma, a double quote, a leading = or a control character
+      </li>
+    }
+  </ul>
+}
